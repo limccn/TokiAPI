@@ -33,6 +33,8 @@ AGENTS.md
 
 .trellis/
 
+.codegraph/
+
 # Playwright MCP 截图/控制台产物
 .playwright-mcp/
 
