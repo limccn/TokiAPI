@@ -14,7 +14,7 @@
 //
 // 限流（D30）：index.ts 对本路径挂 authRateLimit()，路径白名单在
 // src/middleware/auth-rate-limit.ts（credential 桶，10/60s/IP，复用 AUTH_CREDENTIAL_LIMIT
-// binding ⇒ 零 wrangler.toml 改动）。与登录共享计数（校验 1 次 + 登录 ≤9 次每分钟），
+// binding ⇒ 零配置改动）。与登录共享计数（校验 1 次 + 登录 ≤9 次每分钟），
 // 副作用已由 prd D30 认可。
 import type { Hono } from "hono";
 import type { AppEnv } from "../../../types";

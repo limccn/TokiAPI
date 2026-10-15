@@ -64,7 +64,7 @@
 //   做**逐桶精确比对**；环形图图例与中心总数都是精确格式，直接字符串相等。
 //
 // 本机专用脚本：依赖 playwright（未声明为 devDeps，需 `npm i -D playwright && npx playwright install chromium`）
-// 前置：①`npm run dev` 已启动；②本地测试用户已 seed（scripts/seed-users.mjs）；
+// 前置：①`npm run dev` 已启动；②本地 D1 已有测试用户（历史夹具或走注册页建号）；
 //       ③本机 D1 的 request_logs 在 **today 本地窗口**内有秒精度的行——本机既有行写的是**毫秒**，
 //         对应用呈现为远未来、窗口一律不命中（Drizzle integer timestamp 按秒读写）。
 //         脚本会先自查前置，缺数据时明确报「前置未满足」而不是伪装成断言失败。
@@ -311,7 +311,7 @@ try {
   } else if (diag) {
     hint =
       `  诊断探测回 ${diag.status} ${diag.body}（非 origin 问题）—— 检查 dev server 是否在跑、` +
-      "测试用户是否存在（npm run seed:users）。\n";
+      "测试用户是否存在（本地 D1 需已有测试用户）。\n";
   } else {
     hint = `  诊断探测本身失败 —— dev server 大概没在 ${BASE} 上跑。\n`;
   }

@@ -1,107 +1,46 @@
-# 本地开发 / 生产环境变量模板（提交入库；复制为 .dev.vars 后填写，.dev.vars 已被 .gitignore 忽略）
+# 本地开发环境变量模板（提交入库；复制为 .dev.vars 后填写，.dev.vars 已被 .gitignore 忽略）
 #
-# 一套变量名，每个环境一份值 —— 渲染是**段感知**的（scripts/render-wrangler-config.mjs）：
-#   .dev.vars          → 模板顶层段（production / 本地 dev）        ← 本文件
-#   .dev.vars.staging  → 模板 [env.*] 段（staging）                 ← .dev.vars.staging.example
-# `npm run render:config` **一次**即产出含两个环境的 wrangler.toml；**没有 `--env` 参数**
-# （传入会 fail-fast），部署哪个环境只由 `wrangler deploy [--env staging]` 决定。
-#
-# 生产环境：非敏感 vars 在部署 shell export 同名环境变量后重新渲染（烘焙进 wrangler.toml）；
-# 真实 secrets（BETTER_AUTH_SECRET / GITHUB_CLIENT_SECRET / GATEWAY_SECRET_KEY / RESEND_API_KEY）
-# 仅通过 secret put 注入，禁止出现在本文件之外的任何地方。
-# wrangler.toml 由 wrangler.toml.template 渲染生成（npm run render:config），勿直接修改生成物。
+# 2026-10-14 一键发布适配后本文件的职责只有两件事：
+#   1. 承载**真实 secrets** 的本地值（生产用 `wrangler secret put`，永不进任何配置文件/文档/代码）；
+#   2. （可选）本地覆盖 wrangler.jsonc [vars] 的同名键 —— wrangler.jsonc 已带开箱 safe 缺省，
+#      不写任何覆盖也能 `npm run dev`（生产侧的个性化值在维护者本地 wrangler.prod.jsonc，不入库）。
+# 注意：本文件只影响**本地 dev**（wrangler dev / vite dev / wrangler d1 --local），不参与任何
+#       部署配置生成（渲染管线已拆除）—— 生产部署配置与这里完全无关（见 README 部署章节）。
 
-# ---- Infra 结构配置（模板渲染 token；见 CLAUDE.md §环境与配置） ----
-# wrangler 绑定级字段（name / routes / D1 / KV / Queue）与 [vars] 运行时配置都必须是 toml 字面量
-# （wrangler 4.x 实测不解析 {KEY} 占位符），统一经模板渲染烘焙自本文件。值从 Cloudflare dashboard 获取（CLAUDE.md §部署要点）：
-#   WORKER_NAME / DOMAIN / API_DOMAIN -> Workers & Pages 部署名 / 管理台域名 / 公开 API 域名（双域名分流）
-#   LEGACY_DOMAIN             -> 旧域转发源（prod = router.lmlh.net）；**只用于 routes 绑定**，运行时不读该值
-#   D1_DB_NAME / D1_DB_ID     -> `wrangler d1 create <name>` 输出（dashboard 复制 database_id）
-#   KV_ID                     -> `wrangler kv namespace create CACHE_KV` 输出
-#   QUEUE_NAME                -> `wrangler queues create <name>` 创建的队列名（usage 聚合）
-#   BILLING_QUEUE_NAME        -> `wrangler queues create <name>` 创建的延迟计费队列名
-# 注意：部署真实环境时在部署 shell export 同名环境变量覆盖本地占位值（process.env 优先于本文件）。
-# staging 的同名键请写在 .dev.vars.staging（模板见 .dev.vars.staging.example）。
-# LEGACY_DOMAIN 两段各一份（prod = router.lmlh.net / stg = stg-router.lmlh.net）：旧域保留绑定，
-# 由中间件按「host 不属于两类新域 ⇒ 按路径转发」送到本环境的新域，故现存 base_url 零改动继续可用。
-WORKER_NAME=cf-ai-gateway
-DOMAIN=platform.lmlh.net
-API_DOMAIN=api.lmlh.net
-LEGACY_DOMAIN=router.lmlh.net
-D1_DB_NAME=cf-ai-gateway-db
-D1_DB_ID=00000000-0000-0000-0000-000000000000
-KV_ID=00000000000000000000000000000000
-# ---- 资源名（Cloudflare 侧真实资源名；命名式 <worker 名>-<purpose>，见 spec governance/config-inventory 的资源命名规范） ----
-# ⚠ 队列表**不可改名**：改名 = 新建 + 改绑定 + 删旧，且切换后旧队列里在途的消息**永不被消费**（不迁移）。
-#   KV 是本栈**唯一**可原地改名的资源（按 id 寻址 ⇒ id 不变、数据不动）；命令与两个坑见 deployment.md Step 2。
-# ⚠ 改 BILLING_QUEUE_NAME 必须同步 vitest.config.ts 的 pin（否则测试值被本文件牵着走）；
-#   分流的**判别性护栏**是 tests/queue-dispatch.test.ts（A / A′ 两例只差批名，落点必须不同）。
-#   queue() 按 batch.queue === env.BILLING_QUEUE_NAME **精确比对**分流：真实环境里漂移会让计费批落进用量
-#   分支 —— 事件体不含 cost，被 usageEventSchema 挡下、只留一条 warn，**静默不扣费且账上无痕**。
-QUEUE_NAME=cf-ai-gateway-usage
-BILLING_QUEUE_NAME=cf-ai-gateway-billing
-
-# ---- Better Auth ----
-# 会话签名密钥（生产必须为随机值，>=32 字符；不要与 GATEWAY_SECRET_KEY 相同）
+# ---- 真实 secrets（本地填测试值即可；生产 = `wrangler secret put`，见 README 部署后收尾清单）----
+# Better Auth 会话签名密钥（生产必须为随机值，>=32 字符；不要与 GATEWAY_SECRET_KEY 相同）
 BETTER_AUTH_SECRET=local-dev-secret-change-me-0123456789abcdef
-# 前端 origin（本地 vite dev 端口；生产为部署域名）
-# ⚠ 生产 / staging **必须等于管理台域（DOMAIN）的 origin**：分流的平台域是从本键派生的
-#   （`new URL(BETTER_AUTH_URL).hostname`，刻意不新增 PLATFORM_DOMAIN token 以免多一个真源）。
-#   部署 shell 需 export BETTER_AUTH_URL=https://platform.lmlh.net（本地保持 localhost）。
-BETTER_AUTH_URL=http://localhost:5173
-
-# ---- GitHub OAuth ----
-# 本地开发可不配置，GitHub 登录仅在生产需要
-GITHUB_CLIENT_ID=replace-me-github-client-id
-GITHUB_CLIENT_SECRET=replace-me-github-client-secret
-# GitHub OAuth 白名单邮箱（逗号分隔；为空 = 拒绝所有 GitHub 登录，fail-closed）
-GITHUB_ALLOWED_EMAILS=alice@example.com
-
-# ---- 上游 Provider 密钥 AES-GCM 加密密钥 ----
-# 生产：wrangler secret put GATEWAY_SECRET_KEY；任意字符串，建议 >=32 字符随机值
+# 上游 Provider 密钥的 AES-GCM 加密密钥（生产：wrangler secret put；任意字符串，建议 >=32 字符随机值）
 GATEWAY_SECRET_KEY=local-gateway-secret-key-change-me-0123456789abcdef
-
-# ---- 事务邮件通道（Resend，08-27-email-notification） ----
-# Resend API key（**真实 secret**）：本地填在 .dev.vars；生产 / staging 各自
-# `wrangler secret put RESEND_API_KEY`（staging 加 `--env staging`），建议两环境各用一把
-# send-only 的独立 key（blast radius 隔离）。
+# GitHub OAuth App client secret（生产：wrangler secret put）。本地不测 GitHub 登录可不配。
+GITHUB_CLIENT_SECRET=replace-me-github-client-secret
+# Resend 事务邮件 API key（08-27-email-notification；建议用 send-only 独立 key）。
 # **空或缺失 = 通道未配置**：不发信、不抛错，只记 email_not_configured（fail-safe；回滚杠杆之一）。
 RESEND_API_KEY=
-# 收件人白名单（逗号分隔，大小写不敏感，空白项忽略）；**空 = 全放行**（prod 语义）。
-# 名单外收件人静默跳过（记 email_skipped_allowlist，不抛错 —— 保住防枚举的恒定耗时）。
-EMAIL_ALLOWED_RECIPIENTS=
 
-# ---- 其他 ----
-# 全局响应缓存总开关（09-03-stg-cache-investigation）；缺省 false（关闭），设为 true/1/yes/on 开启
-# 即使设为 true，仍需 key.cacheEnabled=true 且非流式且请求体 ≤32KB 才能命中/写入缓存
+# ---- [vars] 本地覆盖（全部可选；缺省值由 wrangler.jsonc 提供，见其注释）----
+# 前端 origin（本地 vite dev 端口）。生产必须等于管理台域 origin —— 在 wrangler.prod.jsonc 设。
+BETTER_AUTH_URL=http://localhost:5173
+# GitHub OAuth App client id + 白名单邮箱（本地测 GitHub 登录时需要；白名单空 = 拒绝所有 GitHub 登录）
+# GITHUB_CLIENT_ID=replace-me-github-client-id
+# GITHUB_ALLOWED_EMAILS=
+# 公开 API 域名（双域名分流；空 = 分流关闭 —— 本地 dev 的正常形态，wrangler.jsonc 缺省即为空）
+# API_DOMAIN=
+# 网关 API Key 明文前缀（缺省 sk-；空白视为未设置。仅影响新生成的 Key）
+# API_KEY_PREFIX=sk-
+# 全局响应缓存总开关（09-03-stg-cache-investigation；缺省 false。设 true/1/yes/on 开启）
 # CACHE_ENABLED=false
-# modelcap 档位乘算常数（09-16 kv-ops O3c 档位化）：cap = BASE × MULT × 档位（modelcaps.ts 存档位）
-# 缺省 8192 × 2 = 16384 基准；改后重跑 render:modelcaps + 部署（档位按当前常数推导）
+# modelcap 档位乘算常数（09-16 kv-ops 档位化；缺省 8192 × 2 = 16384 基准；改后重跑 render:modelcaps）
 # MODELCAP_BASE_TOKENS=8192
 # MODELCAP_MULTIPLIER=2
-# request_logs 明细保留天数（cron 清理用；缺省 30）
-REQUEST_LOG_RETENTION_DAYS=30
-# 网关 API Key 明文前缀（可选；缺省 sk-。空白视为未设置。仅影响新生成的 Key）
-API_KEY_PREFIX=sk-
-# 注册赠金 / 邮箱验证赠金金额（USD，09-16-signup-bonus-grant）：缺省 5（开箱即送）；
-# 显式设 0（或非法值）即不赠（涉及钱，非法配置一律 fail-safe 到少发）
+# 注册赠金 / 邮箱验证赠金金额（USD，09-16-signup-bonus-grant；缺省 5 开箱即送；显式 0 = 不赠）
 # SIGNUP_BONUS_AMOUNT=5
 # EMAIL_VERIFY_BONUS_AMOUNT=5
-# 邮箱验证功能总开关（缺省 false = 休眠：不发验证信、不发验证赠金、前端不展示验证入口）
+# 邮箱验证功能总开关（09-16-signup-bonus-grant；缺省 false = 休眠：不发验证信、不发验证赠金）
 # EMAIL_VERIFICATION_ENABLED=false
-# 账户安全总开关（09-21-email-admin-promotion-switch）：缺省 false = 邮件注册的账户（有 credential
-# 凭据行）永远不能提升为 admin —— PATCH /api/users/:id 对该形态 403，管理画面置灰提升操作。
-# 只拦新提升：降级、停用、以及已是 admin 的幂等重写不受影响。设 true/1/yes/on 才允许提升。
+# 账户安全总开关（09-21-email-admin-promotion-switch；缺省 false = 邮件注册账户不能提升为 admin）
 # EMAIL_ACCOUNT_ADMIN_PROMOTION_ENABLED=false
-# ---- staging 环境的值不在这里 ----
-# staging 与生产/本地**同名键、另一份值**：见 .dev.vars.staging.example（复制为 .dev.vars.staging）。
-# 本文件是「一套变量名」的权威模板，两个 example 的分工：
-#   本文件                  → 模板顶层段（production / 本地 dev）
-#   .dev.vars.staging.example → 模板 [env.*] 段（staging）
-
-# 测试用户批量初始化（仅本地开发；JSON 数组）。设置后暴露 POST /api/seed/users 端点 —— 生产切勿设置！
-# 格式: [{"email":"admin@local.dev","password":"<min 8 位>","name":"Admin","role":"admin"},{"email":"member@local.dev","password":"<min 8 位>","name":"Member","role":"member"}]
-# 09-22-seed-users-dev-only：本变量是**功能开关**，不是安全边界 —— 生产鉴权路径已无引用点
-# （src/lib/auth.ts 不再读它，种子邮箱不再豁免邀请码）；未设置时该路由整体不注册 → 404。
-# 种子用户由路由**自铸一次性邀请码**，走与真实用户完全相同的校验 + 消费链路。
-# SEED_USERS=
+# 事务邮件收件人白名单（逗号分隔；空 = 全放行 —— 仅 EMAIL_VERIFICATION_ENABLED=true 时相关）
+# EMAIL_ALLOWED_RECIPIENTS=
+# request_logs 明细保留天数（cron 清理用；缺省 30）
+# REQUEST_LOG_RETENTION_DAYS=30

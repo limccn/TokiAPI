@@ -8,7 +8,7 @@
 //   - apiDomain      ← `[vars] API_DOMAIN`（显式声明；未配置 ⇒ 分流整体关闭）
 //   - platformDomain ← `BETTER_AUTH_URL` **派生**（不新增 PLATFORM_DOMAIN token：BETTER_AUTH_URL
 //     已经是"本环境管理台 origin"的真源，多一个就是第三个真源，必然漂移）
-// 两个环境（prod / stg）各自的平台域分别成立：`https://platform.lmlh.net` / `https://stg-platform.lmlh.net`。
+// 各部署各自成立：谁的部署谁派生自己的平台域（BETTER_AUTH_URL 指向谁，平台域就是谁）。
 
 /** 只取需要的两个键 —— 使本模块可同时用于 worker 的 `Env`、测试的 `Cloudflare.Env` 与纯字面量。 */
 export interface DomainEnv {
@@ -27,7 +27,7 @@ export interface DomainConfig {
 
 function normalizeHost(raw: string | undefined): string | null {
   const value = raw?.trim();
-  // 空串视为未配置（渲染脚本对空值 fail-fast，但运行时不该假设配置一定合法）
+  // 空串视为未配置（运行时不该假设配置一定合法）
   return value ? value.toLowerCase() : null;
 }
 
@@ -64,9 +64,8 @@ export function isApiPath(path: string): boolean {
 /**
  * 环回 host（本地 dev / 本地验证脚本）。
  *
- * 为什么必须显式挡掉：`.dev.vars` **同时承载生产值与本地的本地值**（spec config-inventory §1 的
- * 已知副作用），所以本地 `npm run dev` 时 `API_DOMAIN` 是真的公网域名 —— 若不做这个例外，
- * `http://localhost:5173/v1/...` 会被 301 到**公网** api 域（本地验证脚本会打到线上）。
+ * 为什么必须显式挡掉：本地 .dev.vars 可覆盖 API_DOMAIN（在本地演练公网域分流）—— 那样
+ * `http://localhost:5173/v1/...` 若不挡掉就会被 301 到**公网** api 域（本地验证脚本会打到线上）。
  * 环回地址不可能是任何 canonical 域，也不可能是需要转发的别名，故永不分流。
  */
 export function isLoopbackHost(host: string): boolean {
@@ -92,11 +91,10 @@ function isLoopbackOrigin(origin: string): boolean {
  * 公开 API 域的 base URL（**不带 `/v1` 后缀**：调用方按 `${apiBaseUrl}${basePath}` 拼接）。
  *
  * **环回例外（必须先于配置取值判定）**：请求来自环回 host 时一律回落请求 origin。
- * 为什么必须与中间件同一条判据：`.dev.vars` **同时承载生产值**（spec config-inventory §1），
- * 所以本地 `npm run dev` 的 `API_DOMAIN` 是真的公网域名；而中间件恰恰因环回例外**放行了**
- * 本地的 `/v1`（否则本地验证脚本会打到线上）。两处若不同步：本地 dev server 自己服务着 `/v1`，
- * 下发的 base URL 却是**生产**网关地址 —— 管理台 Quick start 卡把生产域展示给正在调试的人，
- * 复制即打到线上、真计费，而本地那把 key 在生产根本不存在。
+ * 为什么必须与中间件同一条判据：本地 .dev.vars 可覆盖 API_DOMAIN 演练分流，而中间件恰恰
+ * 因环回例外**放行了**本地的 `/v1`（否则本地验证脚本会打到线上）。两处若不同步：本地 dev
+ * server 自己服务着 `/v1`，下发的 base URL 却是**生产**网关地址 —— 管理台 Quick start
+ * 卡把生产域展示给正在调试的人，复制即打到线上、真计费，而本地那把 key 在生产根本不存在。
  * 判据落在**请求** origin 上（不是配置值上）：同一份配置被环回与非环回请求各问一次，答案本就该不同。
  */
 export function apiBaseUrl(env: DomainEnv, fallbackOrigin: string): string {
@@ -110,7 +108,7 @@ export function apiBaseUrl(env: DomainEnv, fallbackOrigin: string): string {
  *
  * **刻意不加环回例外**（与 `apiBaseUrl` 的非对称是有理由的，别"顺手补对称"）：`BETTER_AUTH_URL`
  * 是"本环境管理台 origin"的**权威声明**，本地那份值本来就是 `http://localhost:5173`；
- * 而 `API_DOMAIN` 是"公网 API 域"，本地那份值是**继承来的生产值**（`.dev.vars` 兼作两用）
+ * 而 `API_DOMAIN` 是"公网 API 域"，本地只在演练分流时才覆盖它（值本就不是给本地服务的）
  * —— 需要例外的正是"本地值不本地"的那一个。若这里也回落，反而会掩盖 `BETTER_AUTH_URL`
  * 配错（配成公网域时本地 dev 根本不该能用）。
  */

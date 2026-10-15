@@ -1,4 +1,4 @@
-// modelcap 档位网格的纯函数（零依赖，照 scripts/lib/toml-sections.mjs 的体例）。
+// modelcap 档位网格的纯函数（零依赖 —— 无 node:fs / 无外部模块，可被 Workers pool 单测直连 import）。
 //
 // 为什么单独成文件：scripts/render-modelcaps.mjs 顶层就 readFileSync + process.exit，而 vitest 跑在
 // Workers pool（workerd）里没有 node:fs —— 谓词留在那个脚本里就**测不到**。抽到这里才能被

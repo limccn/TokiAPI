@@ -1,14 +1,21 @@
 // Vitest + Miniflare 测试配置（M4 4.x 单测环境）。
 // - cloudflareTest 插件在 vitest v4 下注册 Workers pool（@cloudflare/vitest-pool-workers 0.22+）。
-// - wrangler.toml 提供 D1/KV 绑定与 main 入口；TEST_MIGRATIONS 由 Node 侧读取 drizzle/*.sql，
+// - wrangler.jsonc 提供 D1/KV 绑定与 main 入口；TEST_MIGRATIONS 由 Node 侧读取 drizzle/*.sql，
 //   测试运行时用 applyD1Migrations 建表（miniflare 测试 D1 不会自动应用迁移）。
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-pool-workers";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 const migrations = await readD1Migrations(
   fileURLToPath(new URL("./drizzle", import.meta.url)),
 );
+
+// 维护者生产 fork（wrangler.prod.jsonc，gitignored）存在时，把其**原文**注入为 miniflare binding：
+// tests/config-fork.test.ts 的 prod-fork 组跑在 workerd 里（无 node:fs），只能在 Node 侧读文件。
+// 不存在时注入空串 —— 该组据此整组跳过（裸仓库 clone 场景，AC7：无 fork 时全绿）。
+const prodForkPath = fileURLToPath(new URL("./wrangler.prod.jsonc", import.meta.url));
+const prodForkJson = existsSync(prodForkPath) ? readFileSync(prodForkPath, "utf8") : "";
 
 export default defineConfig({
   test: {
@@ -17,7 +24,7 @@ export default defineConfig({
   },
   plugins: [
     cloudflareTest({
-      wrangler: { configPath: "./wrangler.toml" },
+      wrangler: { configPath: "./wrangler.jsonc" },
       miniflare: {
         bindings: {
           // .dev.vars 之外的测试固定值（src/env.d.ts 声明的字符串环境变量）
@@ -56,26 +63,13 @@ export default defineConfig({
           EMAIL_ALLOWED_RECIPIENTS: "",
           // 延迟计费队列名（09-21-prod-resource-naming）：src/index.ts 的 queue() 按
           // `batch.queue === env.BILLING_QUEUE_NAME` **精确比对**分流（不等即落用量分支）。
-          // **必须显式 pin**：不 pin 时该值来自 wrangler.toml 渲染产物 ← `.dev.vars` —— 即测试
-          // 行为被**生产值文件**牵着走（09-22 改队列名时 helpers 的批名与 env 一度错位）。
+          // **必须显式 pin**：不 pin 时该值来自部署配置（wrangler.jsonc）—— 即测试行为会被
+          // 配置文件改动牵着走（09-22 改队列名时 helpers 的批名与 env 一度错位）。
           // 分流的判别性护栏在 tests/queue-dispatch.test.ts（经**真实 queue() 入口**）；
           // billing-queue / usage 两个文件直驱消费者、不读批名，改批名不会让它们变红（已变异验证）。
           BILLING_QUEUE_NAME: "cf-ai-gateway-billing",
-          // seed 路由测试固定种子（dev-only）：安全密码仅存在于测试绑定，不落盘
-          SEED_USERS: JSON.stringify([
-            {
-              email: "seed-admin@test.dev",
-              password: "test-seed-pass-123",
-              name: "Seed Admin",
-              role: "admin",
-            },
-            {
-              email: "seed-member@test.dev",
-              password: "test-seed-pass-123",
-              name: "Seed Member",
-              role: "member",
-            },
-          ]),
+          // 维护者生产 fork 原文（Node 侧读取；空串 = fork 不存在，config-fork 测试据此跳过该组）
+          TEST_PROD_FORK_JSON: prodForkJson,
           TEST_MIGRATIONS: migrations,
         },
       },
