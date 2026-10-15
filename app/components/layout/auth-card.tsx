@@ -16,7 +16,7 @@ export function AuthCard({ title, description, children, footer }: AuthCardProps
       <div className="w-full max-w-md">
         <div className="mb-6 flex items-center justify-center gap-2">
           <ShieldCheck className="size-6 text-primary" aria-hidden="true" />
-          <h1 className="text-xl font-semibold tracking-tight">AI API Gateway</h1>
+          <h1 className="text-xl font-semibold tracking-tight">TokiAPI</h1>
         </div>
         <Card>
           <CardHeader>

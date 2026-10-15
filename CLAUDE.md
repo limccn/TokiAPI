@@ -1,4 +1,4 @@
-# CLAUDE.md — cf-ai-gateway
+# CLAUDE.md — TokiAPI
 
 > 本文件是仓库知识入口（2026-08-28 重建；2026-10-14 随「Deploy to Cloudflare 一键发布适配」重写环境/部署两章）：合并了原 `docs/` 下 6 份文档的要点。
 > 原文档已移管至本地 Trellis spec（`.trellis/spec/governance/`，**不入 git、不随仓库分发**——本文各处 `.trellis/*` 路径均为本地内部 spec，开源仓库里不存在）；全量细节在那里，本文档是已提交的权威摘要与索引。

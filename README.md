@@ -1,15 +1,15 @@
-# AI API Gateway
+# TokiAPI
 
-![AI API Gateway](doc/banner.png)
+![TokiAPI](doc/banner.png)
 
-[![CI](https://github.com/limccn/cf-ai-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/limccn/cf-ai-gateway/actions/workflows/ci.yml)
+[![CI](https://github.com/limccn/TokiAPI/actions/workflows/ci.yml/badge.svg)](https://github.com/limccn/TokiAPI/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **中文 | [English](README.en.md)**
 
 **自托管的 OpenAI 兼容 AI API 网关——一个入口代理多家模型供应商，100% 运行在 Cloudflare 上，无需任何外部服务。**
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/limccn/cf-ai-gateway)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/limccn/TokiAPI)
 
 ## 这是什么
 
@@ -31,7 +31,7 @@
 
 ### 方式一：一键部署（推荐）
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/limccn/cf-ai-gateway)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/limccn/TokiAPI)
 
 点击按钮，Cloudflare 会把仓库克隆到你的账号、按 `wrangler.jsonc` 自动供给 D1 / KV / Queues 资源（真实资源 id 回写到你的仓库副本），构建与发布由 Workers Builds 接管。secrets 与个性化值在 setup 页输入（即 `.dev.vars.example` 中列出的键）。
 
@@ -43,7 +43,7 @@
 ### 方式二：手动部署
 
 ```bash
-git clone <your-repo-url> cf-ai-gateway && cd cf-ai-gateway
+git clone <your-repo-url> tokiapi && cd tokiapi
 npm install
 cp .dev.vars.example .dev.vars   # 本地开发值（真实 secrets 本地值；部署用 secret put，见下节）
 ```
@@ -157,8 +157,8 @@ const message = await anthropic.messages.create({
 **要求**：Node.js ≥ 20 和 npm；本地开发无需 Cloudflare 账号。
 
 ```bash
-git clone <your-repo-url> cf-ai-gateway
-cd cf-ai-gateway
+git clone <your-repo-url> tokiapi
+cd tokiapi
 npm install
 
 # 1. 从提交入库的模板生成本地值文件（gitignored）

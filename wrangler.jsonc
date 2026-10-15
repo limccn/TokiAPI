@@ -1,4 +1,4 @@
-// Cloudflare Workers configuration for AI API Gateway — **Deploy to Cloudflare 按钮形态**（提交入库）。
+// Cloudflare Workers configuration for TokiAPI — **Deploy to Cloudflare 按钮形态**（提交入库）。
 //
 // 本文件是仓库内唯一的常驻 wrangler 配置：本地 dev / build / test（vite 插件与 vitest-pool-workers
 // 按发现顺序找到它）与一键部署（Workers Builds）共用。维护者的生产部署走 gitignored 的
