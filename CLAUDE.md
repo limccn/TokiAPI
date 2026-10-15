@@ -1,12 +1,12 @@
-# CLAUDE.md — cf-ai-gateway
+# CLAUDE.md — TokiAPI
 
-> 本文件是仓库知识入口（2026-08-28 重建）：合并了原 `docs/` 下 6 份文档的要点。
+> 本文件是仓库知识入口（2026-08-28 重建；2026-10-14 随「Deploy to Cloudflare 一键发布适配」重写环境/部署两章）：合并了原 `docs/` 下 6 份文档的要点。
 > 原文档已移管至本地 Trellis spec（`.trellis/spec/governance/`，**不入 git、不随仓库分发**——本文各处 `.trellis/*` 路径均为本地内部 spec，开源仓库里不存在）；全量细节在那里，本文档是已提交的权威摘要与索引。
 > 开发任务流程另见 `.trellis/workflow.md`（同为本地文件，不随仓库分发）。
 
 ## 项目概览
 
-OpenAI 兼容的 **AI API 网关**：单入口代理多家模型供应商（OpenAI 兼容 + Anthropic 原生格式转换），提供团队 key 管理、预付费余额计费、限流、响应缓存、用量分析、Web 管理台。**100% Cloudflare**（Workers / D1 / KV / Queues），无外部服务。SDK 只换 base URL 即可接入。
+OpenAI 兼容的 **AI API 网关**：单入口代理多家模型供应商（OpenAI 兼容 + Anthropic 原生格式转换），提供团队 key 管理、预付费余额计费、限流、响应缓存、用量分析、Web 管理台。**100% Cloudflare**（Workers / D1 / KV / Queues），无外部服务。SDK 只换 base URL 即可接入。支持 **Deploy to Cloudflare 一键部署**（资源自动供给 + 回写）。
 
 - 管理 API：`/api/*`（Better Auth 会话鉴权，角色 admin/member）；代理 API：`/v1/*`、`/anthropic/*`（网关 key 鉴权）。
 技术栈（分层）：
@@ -19,20 +19,34 @@ OpenAI 兼容的 **AI API 网关**：单入口代理多家模型供应商（Open
 | Validation | Zod（`zod` v4 + `@hono/zod-validator`） |
 | Frontend | React 19、React Router v7、Vite、Tailwind CSS v4、shadcn-style UI、React Query |
 | Quality | TypeScript strict、ESLint（flat config）、Vitest + Miniflare、drizzle-kit migrations |
-- 已上线：**staging** `https://stg-platform.lmlh.net`（公开 API `https://stg-api.lmlh.net`；旧域 `stg-router.lmlh.net` 保留为转发源）、**生产** `https://platform.lmlh.net`（公开 API `https://api.lmlh.net`；旧域 `router.lmlh.net` 保留为转发源）。资源完全隔离。
+- 线上实例：生产 `https://platform.lmlh.net`（公开 API `https://api.lmlh.net`）由维护者 fork（`wrangler.prod.jsonc`，gitignored）部署；**staging 环境已退役**（退役 runbook 见本地 `governance/stg-retirement.md`）。
+
+## 部署配置（jsonc 双形态）
+
+> 2026-10-14 起**旧渲染管线（toml 模板 + 段感知渲染脚本）整体拆除**，`wrangler.toml` 是历史名词。配置 = 两份 jsonc：
+
+| 形态 | 文件 | 内容 | 谁在用 |
+| --- | --- | --- | --- |
+| 提交入库 | `wrangler.jsonc` | 占位资源 id（一键部署自动供给并回写真实 id）+ `[vars]` 15 键安全缺省 + **无 routes / 无 env / 无 placement** | 本地 dev / test / CI、一键部署（Workers Builds）、手动部署的缺省 |
+| 维护者 fork | `wrangler.prod.jsonc`（gitignored） | 真实域名 routes（管理台域 + API 域，`custom_domain`）+ 真实 D1/KV id + 个性化 vars + placement | 仅 `npm run deploy` 自动选中 |
+
+- 选择逻辑在 `scripts/deploy.mjs`：fork 存在 → 用 fork；否则用 jsonc。**防呆语义**：维护者肌肉记忆 `npm run deploy` 误用占位 id 覆盖真实生产 worker 绑定，在结构上不可能。
+- `--dry-run` 旗标：`npm run deploy -- --dry-run` 只 build + 打印选中配置与将执行的远程命令（AC6 验证路径）。
+- **三条写配置陷阱**（详见 `wrangler.jsonc` 头注）：① 占位 id 是按钮期望的形态，本地 miniflare 不校验真实存在；② **`wrangler deploy --dry-run` 不校验 `[[queues.producers]]` 指向的队列是否存在**——dry-run 绿只证明配置结构合法，资源就绪以账号侧实查为准（`wrangler queues list` / `wrangler kv namespace list`）；③ **queue() 按队列名精确比对分流**——`BILLING_QUEUE_NAME` `[vars]` 必须与 producers 里 BILLING_QUEUE 的 `queue` 字面一致，漂移 = 计费批静默落进用量分支（不扣费且账上无痕），改队列名两处一起改（`tests/config-fork.test.ts` 钉此不变式）。
+- 迁移形态：`drizzle/` 迁移用 **binding 名**引用（`wrangler d1 migrations apply DB --remote`）；`npm run deploy` 在 deploy 前自动执行。**D1 迁移只增不改**（保证 `wrangler rollback` 兼容旧版本）；回滚用 `wrangler rollback`，勿改已应用迁移。
 
 ## 常用命令
 
 | 命令 | 用途 |
 | --- | --- |
-| `npm run render:config` | 由 `wrangler.toml.template` + 两个值文件（`.dev.vars` / `.dev.vars.staging`，段感知）渲染 `wrangler.toml`（幂等；dev/test/deploy/db:* 前自动跑） |
-| `npm run dev` | Vite dev server（Worker + SPA，Miniflare 绑定） |
-| `npm run build` | 构建 React SPA 到 `dist/` |
-| `npm test` | Vitest 全量（Miniflare：D1/KV/Queues） |
+| `npm run dev` | Vite dev server（Worker + SPA，Miniflare 绑定；读 `wrangler.jsonc` + `.dev.vars`） |
+| `npm run build` | 构建 React SPA 到 `dist/`（vite 插件按 jsonc 的 assets 配置产 `dist/client`） |
+| `npm test` | Vitest 全量（Miniflare：D1/KV/Queues）；**全量须加 `--maxWorkers=2`**（并发 isolate OOM） |
 | `npm run typecheck` / `npm run lint` | 3 个 tsconfig 类型检查 / ESLint |
-| `npm run db:generate` / `db:migrate` / `db:seed` | Drizzle 迁移生成 / 应用（本地 `--local`）/ 种子价格表 |
-| `npm run seed:users` | 按 `.dev.vars` 的 `SEED_USERS` 造本地测试用户（dev only） |
-| `npm run deploy` | build + `wrangler deploy` |
+| `npm run db:generate` / `db:migrate` / `db:seed` | Drizzle 迁移生成 / 本地应用（`--local --config wrangler.jsonc`）/ 本地种子价格表 |
+| `npm run render:modelcaps` | 重算 modelcap 档位（改 `MODELCAP_*` 常数或档位后手动跑） |
+| `npm run deploy` | `scripts/deploy.mjs`：build → 远程迁移 → `wrangler deploy`（自动选 jsonc/prod fork） |
+| `npm run deploy -- --dry-run` | 预览：只 build，打印选中配置与远程命令，不触碰远端 |
 
 ## Git 运用规范（最高约束）
 
@@ -45,7 +59,7 @@ OpenAI 兼容的 **AI API 网关**：单入口代理多家模型供应商（Open
 | `develop` | 唯一 trunk，始终可部署；只接受特性 merge 提交与治理 docs，**禁止直接提交特性代码** |
 | `feat/<name>` | 特性开发，合并进 develop 后即删（短生命周期） |
 | `staging` / `production` | 发布指针分支，平常不开发，发布时推进 |
-| `main` | 仅大版本（语义断代） |
+| `main` | 仅大版本（语义断代）；**一键部署按钮与 Workers Builds 从 main 构建发布** |
 
 ### 特性开发流程（强制 5 步）
 
@@ -78,57 +92,45 @@ git branch -d feat/<name>                          # ⑤ 删除
 6. 多会话协作：重写/删除/reset 前先 `git rev-parse` 校验分支状态，可能影响其他会话的操作先声明。
 
 > push / PR / 发布由仓库所有者（limccn）执行；自动化与助手不得擅自 push。
-> 分支保护规则（main/staging/production 转公开后启用）见 `governance/branching.md`。
+> 分支保护规则见 `governance/branching.md`。
 
-## 环境与配置（env 三分类）
+## 环境与配置（三类）
 
-> 全量：`.trellis/spec/governance/config-inventory.md`（RENDER-ENV token 清单，2026-09-22 实测 **22 个**——段感知改造后 `STAGING` 前缀的孪生键已全删，一套 token 名两段各取一份值；双域名分流又加 `API_DOMAIN`（两段各一份值）与 `LEGACY_DOMAIN`（旧域转发源，**两段各一条 routes**：prod=`router.lmlh.net` / stg=`stg-router.lmlh.net`））。
+> 全量键清单：本地 `.trellis/spec/governance/config-inventory.md`；各键权威注释在 `wrangler.jsonc` 与 `.dev.vars.example`（提交入库的模板）。
 
-1. **真实 secret**（`BETTER_AUTH_SECRET` / `GITHUB_CLIENT_SECRET` / `GATEWAY_SECRET_KEY`）→ 本地 `.dev.vars`、生产 `wrangler secret put`。**禁止出现在 wrangler.toml / 代码 / 文档值中**。
-2. **PII 与环境差异值**（`GITHUB_ALLOWED_EMAILS` / `BETTER_AUTH_URL` / `GITHUB_CLIENT_ID` / `REQUEST_LOG_RETENTION_DAYS` / `API_KEY_PREFIX`）→ wrangler.toml `[vars]` 渲染烘焙，值在**基段 ← `.dev.vars`**、**`[env.*]` 段 ← `.dev.vars.staging`**（再回退 `.dev.vars`）/ 部署 shell export（`process.env` 优先）；缺失即 fail-fast。**策略开关**（`CACHE_ENABLED` / `EMAIL_VERIFICATION_ENABLED` / `EMAIL_ACCOUNT_ADMIN_PROMOTION_ENABLED` 等）走同一机制，缺省一律**关闭**（fail-closed）。
-3. **基础设施资源 ID**（D1 database_id、KV id、Queue 名、worker 名、自定义域名）→ toml 字面量，经 `wrangler.toml.template` 模板 token（`WORKER_NAME` / `DOMAIN` / `API_DOMAIN` / `LEGACY_DOMAIN` / `D1_DB_*` / `KV_ID` / `QUEUE_NAME` / `BILLING_QUEUE_NAME`）渲染管理，**两段同名**（旧域 `LEGACY_DOMAIN` 也两段各一条 routes，值各取各的值文件）。域名 token 一律**不进渲染脚本的 `DEFAULT_VALUES`**——域名没有安全缺省，缺值即 fail-fast。
+1. **真实 secrets**（`BETTER_AUTH_SECRET` / `GATEWAY_SECRET_KEY` / `GITHUB_CLIENT_SECRET` / `RESEND_API_KEY`）→ **绝不进任何 jsonc / 文档 / 代码**。生产走 `wrangler secret put`（每环境独立；`GATEWAY_SECRET_KEY` 与 `BETTER_AUTH_SECRET` 分别随机生成、不得相同）；本地 dev 走 `.dev.vars`（gitignored，复制自 `.dev.vars.example`）；一键部署在 setup 页输入。
+2. **个性化 vars**（PII 与环境差异值 `BETTER_AUTH_URL` / `GITHUB_CLIENT_ID` / `GITHUB_ALLOWED_EMAILS`，加策略开关 `CACHE_ENABLED` / `EMAIL_VERIFICATION_ENABLED` / `EMAIL_ACCOUNT_ADMIN_PROMOTION_ENABLED` 等）→ `wrangler.jsonc` `[vars]` 承载**安全缺省**（开关缺省一律关闭，白名单空 = 拒绝，fail-closed）；部署后按收尾清单用 Dashboard vars 或维护者 fork 覆盖；本地覆盖走 `.dev.vars`（**只影响本地 dev**）。
+3. **基础设施资源 ID**（D1 database_id、KV id、Queue 名、worker 名、自定义域名）→ jsonc 字面量。提交形态是**占位 id**（按钮自动供给后回写真实值）；维护者把真实 id 与域名 routes 放进 `wrangler.prod.jsonc`。资源命名式 **`<worker 名>-<purpose>`**。域名是安全敏感值：提交形态**刻意零域名**（`tests/config-fork.test.ts` 断言不含维护者域名）。
 
-**关键坑（2026-08-26 实测）**：wrangler 4.x **不解析 `{KEY}` 占位符**——`[vars]` 值必须在构建期烘焙真实值（`npm run render:config`），否则占位符字面量进运行时。渲染脚本仅读白名单键、缺键 fail-fast、值含本地占位特征（localhost/placeholder-/@example.com）时 WARN。
+**关键坑（仍然成立）**：
 
-- `wrangler.toml` 是**生成物**（gitignored），勿直改；改配置走两个值文件 + render。**渲染是段感知的**：一次 `npm run render:config` 同时产出两环境的正确内容，`--env` 渲染参数已移除（传入即 fail-fast）——部署哪个环境只由 `wrangler deploy [--env staging]` 决定。
-- `.dev.vars.example` / `.dev.vars.staging.example` 是全部键的权威模板（提交入库）；本地 `cp .dev.vars.example .dev.vars` 填本地值，`cp .dev.vars.staging.example .dev.vars.staging` 填 staging 值（**同名键**）。`.dev.vars.staging` 缺失时环境段回退到 `.dev.vars`（WARN，`predev`/`pretest` 仍能跑）；渲染脚本保留一道网兜——若将来出现「只在环境段、又无缺省」的 token，那种状态会 **fail-fast**（回退 WARN 与建文件指引先打印）。**不可据此部署 staging**（回退状态下 stg 段拿到的是 prod 的值）。
-- **顶层 `[vars]` 就是生产值，来源是 `.dev.vars`（同时也服务本地 dev）**——本地为跑邮件链路填的开关/白名单会被 `predeploy` 原样烘焙进生产。发生产前须在部署 shell `export EMAIL_VERIFICATION_ENABLED` / `EMAIL_ALLOWED_RECIPIENTS` 覆盖并核对 deploy banner。详见 deployment.md「Production mail safety」。
-- `SEED_USERS` 仅本地 dev 用（设置才注册 `POST /api/seed/users` 路由）；**生产/staging 切勿设置**。
-- 改 env 相关代码后自查：`git grep` 真实值、`git status` 确认 `.dev.vars` 未跟踪、`git check-ignore` 复核忽略规则。
+- `BETTER_AUTH_URL` 同时是双域名分流的「平台域」真源（`new URL(BETTER_AUTH_URL).hostname`，见 `src/lib/domains.ts`）。缺省 localhost 是已知错误值特征：管理面（`/api/*` 与 SPA）会被 301 到 `https://localhost/...`，`/v1` 照常——**部分可用**，部署后必须改成实际 origin。
+- GitHub OAuth 回调必须精确等于 `https://<origin>/api/auth/callback/github`（origin 与 `BETTER_AUTH_URL` 一致）；`GITHUB_ALLOWED_EMAILS` 为空 = 拒绝所有登录（fail-closed）。
+- `[[ratelimits]]` 的 `namespace_id` 是**账号级**命名空间：同账号同值跨 Worker 共享计数。一键部署用户各自部署到各自账号，1001/1002 无碰撞；**同账号部署多个实例时须自行错开段位**。
+- 本地 curl 验证线上可能需 `--ssl-no-revoke`（Windows schannel CRL）与自定义域名（workers.dev 域名在部分网络被 DNS 污染）。
+- cron 每日 02:00 UTC 清理 `request_logs`（保留 `REQUEST_LOG_RETENTION_DAYS`，缺省 30）。
+- vite 插件构建会在 `dist/` 产出生成的 `wrangler.json`（丢注释、丢 routes 细节）——部署一律走 `npm run deploy`（内部显式 `--config <选中>`）或显式 `--config`，勿依赖构建产物里的配置。
 
 ## 部署要点
 
-> 全量从零手册：`.trellis/spec/governance/deployment.md`（9 步：D1 → KV → Queue → 迁移+seed → secrets/vars → GitHub OAuth App → 首个 admin → build+deploy → 验收清单）。
+> 全量从零手册：README「快速开始 + 部署后收尾清单」+ 本地 `governance/deployment.md`。
 
-- **永远显式 `--config wrangler.toml`**（staging 加 `--env staging`）：vite 插件生成的 `dist/cf_ai_gateway/wrangler.json` 丢弃 `[env.*]` 段，不带 `--config` 时 `--env staging` 会静默部署生产配置。
-- D1 迁移**只增不改**（保证 `wrangler rollback` 兼容旧版本）；回滚用 `wrangler rollback`，勿改已应用迁移。
-- **`wrangler deploy --dry-run` 不校验 `[[queues.producers]]` 指向的队列是否存在**（2026-09-22 实测：生产渲染产物指向不存在的 `billing-aggregation` 时，prod 与 `--env staging` 两次 dry-run **均 exit 0**）。故 dry-run 绿只证明"配置结构合法"，**不能当"资源就绪"检查**——它会给出一枚"本地全绿、真实 `wrangler deploy` 才炸"的静默地雷。资源就绪的唯一判据是账号侧实查：`wrangler queues list` / `wrangler kv namespace list`。**建队列必须先于真实 deploy 完成**（同理，`develop`「始终可部署」在队列缺失时并不成立）。
-- 资源命名式 **`<worker 名>-<purpose>`**（生产 `cf-ai-gateway-*` / staging `cf-ai-gateway-staging-*`）。**KV 是本栈唯一可原地改名的资源**（`wrangler kv namespace rename --namespace-id <id> --new-name <名>`：按 id 寻址 ⇒ id 不变、数据不动、绑定无需改；**别用 key 计数前后对比来验证数据还在**——活流量下计数是读数时刻的函数）；**队列表不可改名**，改名 = 新建 + 改绑定 + 删旧，且切换后旧队列的在途消息永不被消费。全表见 `.trellis/spec/governance/config-inventory.md` 的「资源命名规范」。
-- secrets 每环境独立（`--env staging`）；`GATEWAY_SECRET_KEY` / `BETTER_AUTH_SECRET` 分别生成独立随机值（`crypto.randomBytes(32)`），二者不得相同。
-- 首个 admin 无自提升端点：GitHub OAuth 登录（白名单内）→ 直接 D1 `UPDATE users SET role='admin'`（唯一合法 bootstrap；**禁止 SQL INSERT 造用户**——Better Auth 哈希/绑定会被绕过）。
-- `[env.staging]` 不继承顶层 `[vars]`；顶层 assets / compatibility_date 继承。
-- **`[[ratelimits]]`（认证面限流，09-28-auth-rate-limit-fix）同样不继承**——`[env.staging]` 段必须另写 `[[env.staging.ratelimits]]`，漏写不报错、只会让 staging 静默不限流（运行时落在中间件的 binding 缺席 fail-open 分支，日志 `auth_rate_limit_binding_missing`）。且 `namespace_id` 是**账号级**命名空间、同值跨 Worker 共享计数 ⇒ prod（1001/1002）与 stg（2001/2002）段位必须不同。`deploy --dry-run` 同样判不了这套绑定是否真正生效（套餐门槛文档无记载），以真实 deploy 后 AC11 探针为准。
-- GitHub OAuth 回调必须精确等于 `https://<origin>/api/auth/callback/github`（origin 与 `BETTER_AUTH_URL` 一致）；`GITHUB_ALLOWED_EMAILS` 为空 = 拒绝所有登录（fail-closed）。
-- **`BETTER_AUTH_URL` 同时是双域名分流的「平台域」真源**（`new URL(BETTER_AUTH_URL).hostname`，见 `src/lib/domains.ts`；刻意不新增 `PLATFORM_DOMAIN` token 以免多一个真源）⇒ 生产/staging 部署 shell **必须** export 它（`https://platform.lmlh.net` / `https://stg-platform.lmlh.net`）。忘了 export 的后果是**部分可用**：`/v1` 照常，但管理面（`/api/*` 与 SPA）会被 301 到 `https://localhost/...`。部署后探针：`curl -sI https://<平台域>/` 与 `https://<api 域>/api/health` 均须 200。
-- cron 每日 02:00 UTC 清理 `request_logs`（保留 `REQUEST_LOG_RETENTION_DAYS`，默认 30）。
-- 本地 curl 验证线上可能需 `--ssl-no-revoke`（Windows schannel CRL）与自定义域名（workers.dev 域名在部分网络被 DNS 污染）。
+- **一键部署（按钮）**：克隆仓库 → 按 `wrangler.jsonc` 自动供给 D1/KV/Queues（Queues 需 Workers Paid）→ 回写资源 id → Workers Builds 从 `main` 构建发布。**迁移不自动执行**——收尾清单第 1 步手动 `npx wrangler d1 migrations apply DB --remote`。
+- **维护者生产部署**：本地生成 `wrangler.prod.jsonc`（真实 routes/id/vars；生成流程与字段表在本地 governance spec，**先加 .gitignore 再落盘**）→ `npm run deploy` 自动选中 → 探针验收。secrets 不进 fork，仍走 `wrangler secret put`。
+- **🔴 fork `[vars]` 部署前须人工核对**：实施期 fork 从本地 `.dev.vars` 生成，其中 `GITHUB_CLIENT_ID="placeholder-github-client-id"` / `GITHUB_ALLOWED_EMAILS`（本地测试邮箱）/ `EMAIL_VERIFICATION_ENABLED="true"` 是 **dev 遗留值**（真实生产值历来自部署 shell export，从未落 `.dev.vars`）。每次用 fork 部署前核对这五键（加 `BETTER_AUTH_URL` / `EMAIL_ALLOWED_RECIPIENTS`）为真实生产值；`wrangler deploy` banner 会打印解析值（`env.X ("...")` 行），据此最终确认。
+- **首个 admin 无自提升端点**：GitHub OAuth 登录（白名单内）→ 直接 D1 `UPDATE users SET role='admin' WHERE email=...`（唯一合法 bootstrap；**禁止 SQL INSERT 造用户**——Better Auth 哈希/绑定会被绕过）。无用户状态不能发邀请码，故 GitHub OAuth 是 bootstrap 唯一入口（README 收尾清单）。
+- **删队列前先删消费者**：`wrangler deploy` 不删旧 consumer（实测孤儿消费者会常驻）；删旧队列先 `consumer remove`，归零用 `purge`。**队列表不可改名**，改名 = 新建 + 改绑定 + 删旧，切换后旧队列在途消息永不被消费。
+- 资源命名式 `<worker 名>-<purpose>`；KV 是本栈唯一可原地改名的资源（`wrangler kv namespace rename`，按 id 寻址数据不动；**别用 key 计数前后对比验证数据还在**——活流量下计数是读数时刻的函数）。全表见本地 `config-inventory.md`。
+- 本地验证 `wrangler deploy --dry-run` 只证明配置结构合法（含队列存在性在内的资源就绪要账号侧实查，见上文陷阱②）。
 
-## 验收状态（AC1–AC9 全部 PASSED）
+## 验收状态
 
-> 全量证据与复跑命令：`.trellis/spec/governance/verification.md`。
+> 全量证据与复跑命令：本地 `.trellis/spec/governance/verification.md`。
 
-- 本地：`npm test`（46 tests）+ `npm run lint` + `npm run typecheck` + `wrangler deploy --dry-run` 全绿。
-- E2E：`node scripts/mock-upstream.mjs`（:8788）+ `npm run dev` + `node scripts/verify-m3.mjs` / `verify-m4.mjs`（auth → keys → providers → /v1/* → 计费/限流/缓存）。
-- **单测清单（现状 10-08）**：`tests/` 共 75 个 `*.test.ts`，按域归组（下列省略 `.test.ts` 后缀）：
-  - 代理管线与协议（26）：anthropic-inbound、config-enhance、disguise、endpoint-face-gate、error-adapt、error-format、forward-headers.unit、http-options.unit、max-tokens-clamp、model-id.unit、model-mask.unit、protocol-detect、protocol-detect-integration、proxy-pipeline、reasoning-effort-mapping、responses-api、responses-reasoning-visibility、sdk-integration、stream-include-usage、stream-settle、stream-thinking-interop、thinking-passthrough、verbatim-engine、verbatim-fidelity、verbatim-passthrough、verbatim-response-side
-  - 计费/余额/用量（9）：billing、billing-queue、bonus.unit、model-price-display.unit、settings、signup-bonus、transactions、usage、usage-series.unit
-  - 限流/缓存（4）：auth-rate-limit、cache、rate-counter、rate-limit
-  - 供应商与模型配置（15）：modelcap-fastpath、modelcap-grid.unit、modelcaps.unit、models-api、multi-upstream、provider-declare-endpoint、provider-endpoints.unit、provider-form.unit、provider-key-mask.unit、provider-ping、provider-presets-route、provider-presets.unit、provider-router、provider-test-probe、provider-test-state.unit
-  - 认证/账户/邀请（13）：admin-promotion-policy.unit、admin-users-delete、admin-users-promotion-switch、api-keys、change-password、email、email-verification-send、invite-check.unit、invite-link.unit、invite-register、invite-validate、onboarding、profile
-  - 管理台 UI（3）：format、menu-position.unit、popover-position.unit
-  - 基础设施/配置（5）：domain-split、migration-rebuild、queue-dispatch、render-config.unit、seed-users
-- AC6/AC9 已线上验证（2026-08-25，prod + staging，真实 GitHub OAuth 账号登录、双 admin 经 D1 提升）。
-- 已知偏差：`PATCH /api/admin/settings` 未实现（只读设计）；`recharge` 账目类型无端点写入（管理端充值记为 `adjust`）；**线上环境需用户自带凭据**（GitHub OAuth App client secret 经 `wrangler secret put`、上游供应商真实密钥部署后在管理台配置——生产清单见 §部署要点；线上已部署，域名见「项目概览」）。
+- 功能验收 AC1–AC9 全部 PASSED（本地 2026-08-25 `npm test` + lint + typecheck + dry-run 全绿；E2E `scripts/mock-upstream.mjs` + `verify-m3.mjs` / `verify-m4.mjs` 走 auth → keys → providers → /v1/* → 计费/限流/缓存）。AC6/AC9 已线上验证（2026-08-25，真实 GitHub OAuth 登录、双 admin 经 D1 提升）；认证面限流 AC11 已线上验证（2026-09-28，25 连发 22×401→3×429）。均为当时线上（含已退役的 staging）证据。
+- **2026-10-14 一键部署适配后**：删除 `tests/render-config.unit.test.ts`（渲染管线拆除）与 `tests/seed-users.test.ts`（种子用户机制拆除），新增 `tests/config-fork.test.ts`（配置 fork 护栏）；全量测试/lint/typecheck/dry-run 复跑结果以该适配的交付报告与 CI 为准。
+- **单测清单（10-08 现状，10-14 适配后按上条增删）**：`tests/` 按域归组（省略 `.test.ts`）：代理管线与协议 26 个（anthropic-inbound、config-enhance、disguise、endpoint-face-gate、error-adapt、error-format、forward-headers.unit、http-options.unit、max-tokens-clamp、model-id.unit、model-mask.unit、protocol-detect、protocol-detect-integration、proxy-pipeline、reasoning-effort-mapping、responses-api、responses-reasoning-visibility、sdk-integration、stream-include-usage、stream-settle、stream-thinking-interop、thinking-passthrough、verbatim-engine、verbatim-fidelity、verbatim-passthrough、verbatim-response-side）；计费/余额/用量 9（billing、billing-queue、bonus.unit、model-price-display.unit、settings、signup-bonus、transactions、usage、usage-series.unit）；限流/缓存 4（auth-rate-limit、cache、rate-counter、rate-limit）；供应商与模型配置 15（modelcap-fastpath、modelcap-grid.unit、modelcaps.unit、models-api、multi-upstream、provider-declare-endpoint、provider-endpoints.unit、provider-form.unit、provider-key-mask.unit、provider-ping、provider-presets-route、provider-presets.unit、provider-router、provider-test-probe、provider-test-state.unit）；认证/账户/邀请 13（admin-promotion-policy.unit、admin-users-delete、admin-users-promotion-switch、api-keys、change-password、email、email-verification-send、invite-check.unit、invite-link.unit、invite-register、invite-validate、onboarding、profile）；管理台 UI 3（format、menu-position.unit、popover-position.unit）；基础设施/配置 5→4（domain-split、migration-rebuild、queue-dispatch、**config-fork**；render-config.unit 与 seed-users 已随拆除删除，modelcap-grid.unit 计入模型配置组）。
+- 已知偏差：`PATCH /api/admin/settings` 未实现（只读设计）；`recharge` 账目类型无端点写入（管理端充值记为 `adjust`）；`scripts/verify-codex-lite.mjs` 的 E2E_STG=1 模式随 staging 退役成为遗留死路（显式 fail-fast 并指向退役 runbook，未删除以保留参数对照）；线上环境需用户自带凭据（GitHub OAuth App client secret 经 `wrangler secret put`、上游供应商真实密钥部署后在管理台配置）。
 
 ## API 参考
 
@@ -182,26 +184,27 @@ await openai.responses.create({ model, input: "hi" });
 
 Anthropic SDK 请求原生携带 `x-api-key` + `anthropic-version` 头；两者在所有代理入口均被接受（缺 `Authorization: Bearer` 时 `x-api-key` 兜底）。
 
-## 安全（公开 repo 准备）
+## 安全
 
-> 全量：`.trellis/spec/governance/security-audit.md`。
+> 全量：本地 `.trellis/spec/governance/security-audit.md`（基线 2026-09-23：0 HIGH/2 MED/4 LOW；P2–P6 暂缓）。
 
-- 2026-08-26 gitleaks 全历史 **0 命中**；历史 PII 已全量 squash 清除（`03352b0`），远程零 PII；备份在本地 tag `backup/develop-pre-reorg-20260827` + `/tmp/gw-backup.bundle`。
-- 已有零-secrets 轻量 CI（`.github/workflows/ci.yml`：test / lint / typecheck，`permissions: contents: read`，不引用任何 secrets，占位值文件由 example 派生）；转公开前执行 security-audit.md 的 checklist（分支保护、Secrets 检查、SEED_USERS 确认等）。
+- 2026-08-26 gitleaks 全历史 **0 命中**；历史 PII 已全量 squash 清除，远程零 PII；仓库已于 2026-10-08 转公开（checklist 见 security-audit.md §0–§7；**永不推 `backup/*` tags**）。
+- 零-secrets 轻量 CI（`.github/workflows/ci.yml`：build / test / lint / typecheck，`permissions: contents: read`，不引用任何 secrets；**CI 无 `.dev.vars`**——测试环境由 vitest.config.ts 全量 pin + `TEST_MIGRATIONS` 提供，`wrangler.jsonc` 常驻仓库提供绑定）。
 
 ## 项目结构
 
 ```
 src/                 Worker backend (Hono)
   routes/            API modules (usage, billing, settings, keys, providers, models, users, v1)
-  middleware/        requestContext, requireSession/adminOnly, gateway auth
+  middleware/        requestContext, requireSession/adminOnly, gateway auth, domain-split
   lib/               billing, rate limiting, cache, cleanup, security, adapters helpers
   providers/         openai / anthropic adapters + SSE conversion
   db/                Drizzle schema + D1 access
 app/                 React SPA (React Router v7, React Query, Tailwind)
 tests/               Vitest + Miniflare suite
-scripts/             mock upstream + E2E verification scripts
-CLAUDE.md            knowledge entry (git workflow / env config / deploy / AC summary; extended specs live in a local, gitignored store — not shipped)
+scripts/             mock upstream + E2E verification + deploy runner (deploy.mjs)
+wrangler.jsonc       常驻部署配置（按钮形态：占位 id + 安全缺省 vars，无 routes）
+CLAUDE.md            knowledge entry (deploy config / git workflow / env config / deploy / AC summary; extended specs live in a local, gitignored store — not shipped)
 drizzle/             SQL migrations
 ```
 
@@ -210,6 +213,6 @@ drizzle/             SQL migrations
 > 以下 `.trellis/*` 路径均为**本地内部 spec / 工作流文件**（gitignored，不随开源仓库分发）；链接仅供参考，仓库读者不可达。
 
 - Spec 主索引：`.trellis/spec/README.md`（backend / frontend / shared / guides / big-question / **governance**）。
-- Governance 类目（本仓库治理/运维全量）：`.trellis/spec/governance/index.md`。
+- Governance 类目（本仓库治理/运维全量）：`.trellis/spec/governance/index.md`（含 **stg-retirement.md**：staging 环境退役 runbook）。
 - 开发任务工作流（任务创建需用户同意）：`.trellis/workflow.md`。
 - 原 `docs/` 目录已于 2026-08-28 删除（内容移管至此 + 本文件）。

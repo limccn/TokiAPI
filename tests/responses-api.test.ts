@@ -434,6 +434,72 @@ describe("buildInternalFromResponses（入站映射）", () => {
     expect(result["messages"]).toEqual([{ role: "user", content: "hi" }]);
   });
 
+  it("web_search_call 等 8 类服务端执行 item → 识别 + 丢弃（不再 400）", () => {
+    // 白名单逐类型验证：无 Chat 对应物且无 call_id 配对，丢弃不产生孤儿 tool 消息；
+    // web_search_call 用 Codex 真实重放形态（action 字段），其余类型最小形态即可
+    const replayShapes: Record<string, Record<string, unknown>> = {
+      web_search_call: {
+        type: "web_search_call",
+        id: "ws_1",
+        status: "completed",
+        action: { type: "search", query: "OpenAI Responses API" },
+      },
+    };
+    for (const type of [
+      "web_search_call",
+      "file_search_call",
+      "code_interpreter_call",
+      "image_generation_call",
+      "mcp_call",
+      "mcp_list_tools",
+      "mcp_approval_request",
+      "mcp_approval_response",
+    ]) {
+      const result = buildInternalFromResponses({
+        model: MODEL,
+        input: [replayShapes[type] ?? { type }, { role: "user", content: "hi" }],
+      });
+      expect(result["messages"]).toEqual([{ role: "user", content: "hi" }]);
+    }
+  });
+
+  it("custom_tool_call / custom_tool_call_output → call_id 配对类型保持 400（fail-closed）", () => {
+    // 配对类型成对降级需专门设计（孤儿 tool 消息风险）；computer_call 未知类型钉子已有，勿动
+    expect(() =>
+      buildInternalFromResponses({
+        model: MODEL,
+        input: [{ type: "custom_tool_call", call_id: "call_1", name: "run", input: "x" }],
+      }),
+    ).toThrow(AdapterError);
+    expect(() =>
+      buildInternalFromResponses({
+        model: MODEL,
+        input: [{ type: "custom_tool_call_output", call_id: "call_1", output: "x" }],
+      }),
+    ).toThrow(AdapterError);
+  });
+
+  it("[reasoning, web_search_call, assistant] → pending reasoning 在 dropped item 处一并丢弃", () => {
+    // 与 tool_search 先例一致：pending reasoning 不跨越 dropped item 挂给后续 assistant
+    // （reasoning 只挂 assistant 消息，不做保真增强）
+    const result = buildInternalFromResponses({
+      model: MODEL,
+      input: [
+        { type: "reasoning", id: "rs_1", summary: [{ type: "summary_text", text: "thinking" }] },
+        {
+          type: "web_search_call",
+          id: "ws_1",
+          status: "completed",
+          action: { type: "search", query: "OpenAI Responses API" },
+        },
+        { role: "assistant", content: "answer" },
+      ],
+    });
+    expect(result["messages"]).toEqual([{ role: "assistant", content: "answer" }]);
+    const messages = result["messages"] as Array<Record<string, unknown>>;
+    expect(messages[0]).not.toHaveProperty("reasoning_content");
+  });
+
   it("client_metadata 顶层字段 → 丢弃（不进内部形态）", () => {
     const result = buildInternalFromResponses({
       model: MODEL,

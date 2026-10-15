@@ -13,7 +13,7 @@
 // （key 29 = local-dev-key，属于 user 22，是真实配对）。usage 页 admin 视角是全站聚合，两者都能看到。
 //
 // 用法：node scripts/gen-usage-fixture.mjs > fixture.sql
-//       npx wrangler d1 execute cf-ai-gateway-db --local --config wrangler.toml --file fixture.sql
+//       npx wrangler d1 execute cf-ai-gateway-db --local --config wrangler.jsonc --file fixture.sql
 // 注意：/tmp 在 Git Bash 下会被 node 解析成 d:\tmp，文件请落在工作区内（用完 rm）。
 
 const TZ_OFFSET_MIN = -new Date().getTimezoneOffset(); // 本机为 +480（UTC+8）

@@ -1,5 +1,5 @@
 {
-  "name": "cf-ai-gateway",
+  "name": "tokiapi",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -13,17 +13,10 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.test.json",
     "lint": "eslint .",
     "test": "vitest run",
-    "render:config": "node scripts/render-config.mjs",
-    "predev": "npm run render:config",
-    "predeploy": "npm run render:config",
-    "pretest": "npm run render:config",
-    "predb:migrate": "npm run render:config",
-    "predb:seed": "npm run render:config",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "wrangler d1 migrations apply cf-ai-gateway-db --local",
-    "db:seed": "wrangler d1 execute cf-ai-gateway-db --local --file=./seed.sql",
-    "seed:users": "node scripts/seed-users.mjs",
-    "deploy": "npm run build && wrangler deploy --config wrangler.toml",
+    "db:migrate": "wrangler d1 migrations apply DB --local --config wrangler.jsonc",
+    "db:seed": "wrangler d1 execute DB --local --file=./seed.sql --config wrangler.jsonc",
+    "deploy": "node scripts/deploy.mjs",
     "render:modelcaps": "node scripts/render-modelcaps.mjs"
   },
   "dependencies": {

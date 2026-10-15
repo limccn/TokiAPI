@@ -7,7 +7,8 @@
 // 拒绝（400）：previous_response_id / conversation（D7：无状态会话，客户端须每轮自带完整 input items）。
 // additional_tools（Codex Responses Lite ≥0.149.0 / GPT-5.6 系）：工具 hoist 并入请求级 tools（Bifrost/headroom 同语义），
 // carrier item 不产生消息。
-// 降级（丢弃 + 告警日志）：store / include / metadata / 内置工具 / 非 function tool_choice 等（OR §4 风险 1）。
+// 降级（丢弃 + 告警日志）：store / include / metadata / 内置工具 / 非 function tool_choice 等（OR §4 风险 1）；
+// 服务端执行类 input item（web_search_call 等 8 类白名单，DROPPED_INPUT_ITEM_TYPES）。
 import type { Logger } from "../lib/logger";
 import { logger as moduleLogger } from "../lib/logger";
 import { AdapterError } from "./types";
@@ -61,6 +62,28 @@ interface PendingReasoning {
 export const INCLUDE_REASONING_ALLOWED = new Set([
   "reasoning.summary_text",
   "reasoning.raw",
+]);
+
+/**
+ * 服务端执行类 input item 白名单（10-14-web-search-call-unsupported）：识别 + 丢弃 + 告警
+ * （不再 400，与 tool_search_call 先例同款分支）。这些 item 由上游服务端执行（web search /
+ * file search / code interpreter / 图像生成 / MCP），无 Chat 对应物且**无 call_id 配对**
+ * （mcp approval 对按 item id 关联、成对丢弃），丢弃不产生孤儿 tool 消息、不损失模型可见语义。
+ * item 只经历史重放可达（verbatim 上游服务端执行过 / 历史来自外部后端如 ChatGPT），而 D7
+ * 无状态重放 + `toInternal` 先于供应商候选循环（proxy.ts:421）⇒ 400 不可被故障转移自救、
+ * 会永久毒化线程，故降级 drop+warn。
+ * 配对类型（`computer_call`/`computer_call_output`、`custom_tool_call`/`custom_tool_call_output`）
+ * 不入此名单：call_id 成对结构，成对降级需专门设计（孤儿 tool 消息风险），保持 400。
+ */
+const DROPPED_INPUT_ITEM_TYPES = new Set([
+  "web_search_call",
+  "file_search_call",
+  "code_interpreter_call",
+  "image_generation_call",
+  "mcp_call",
+  "mcp_list_tools",
+  "mcp_approval_request",
+  "mcp_approval_response",
 ]);
 
 export function parseIncludeReasoning(body: JsonObject, logger: Logger): boolean {
@@ -228,7 +251,8 @@ export function buildInternalFromResponses(
   return internal;
 }
 
-/** input items 数组 → messages（逐条防御性转换；不识别 item 类型 → 400）。
+/** input items 数组 → messages（逐条防御性转换；服务端执行类白名单 DROPPED_INPUT_ITEM_TYPES
+ *  → drop+warn；其余不识别 item 类型 → 400）。
  *  extraTools：additional_tools items（Codex Responses Lite）携带的工具原始定义收集处。
  *  pendingReasoning：reasoning item 提取文本的挂载状态（只挂给下一个 assistant 消息）。 */
 function pushItems(
@@ -267,8 +291,15 @@ function pushItems(
       // 历史重放若带此类项，识别 + 丢弃 + 告警（理由记录：丢弃后发现工具丢失可接受，路径不可达）
       dropPendingReasoning(pendingReasoning, logger);
       logDropped(logger, `${type}_item`);
+    } else if (typeof type === "string" && DROPPED_INPUT_ITEM_TYPES.has(type)) {
+      // 服务端执行类 item（web_search_call 等 8 类白名单）：无 Chat 对应物且无 call_id 配对 →
+      // 识别 + 丢弃 + 告警（不再 400）；与 tool_search 先例同款：pending reasoning 一并丢弃
+      // （reasoning 只挂 assistant 消息）。与 tool_search 分支理由不同：白名单是真实可达路径的降级
+      dropPendingReasoning(pendingReasoning, logger);
+      logDropped(logger, `${type}_item`);
     } else {
-      // file_search_call / web_search_call / computer_call / code_interpreter / MCP 等：无法映射 → 400
+      // computer_call / custom_tool_call 等配对类型与真正未识别类型：无法映射 → 400
+      // （配对类型成对降级需专门设计——孤儿 tool 消息风险比显式 400 更糟，fail-closed 保留）
       throw new AdapterError(
         `Unsupported input item type '${String(type)}'`,
       );

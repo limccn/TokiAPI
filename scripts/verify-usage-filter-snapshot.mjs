@@ -19,7 +19,7 @@
 // 不构成灵敏度信号，用了会得到「看起来通过」的假绿。
 //
 // 本机专用脚本：依赖 playwright（未声明为 devDeps，需 `npm i -D playwright && npx playwright install chromium`）
-// 前置：npm run dev 已启动；本地测试用户已 seed（scripts/seed-users.mjs）；本机 D1 的 request_logs
+// 前置：npm run dev 已启动；本地 D1 已有测试用户（历史夹具或走注册页建号）；本机 D1 的 request_logs
 //       在 today 或 yesterday 窗口内有数据（页面直读 request_logs，无数据时前置断言会明确报出，
 //       不是脚本坏了）。注意 Drizzle integer timestamp 按**秒**存储，写入毫秒值则行对应用不可见。
 // 用法：node scripts/verify-usage-filter-snapshot.mjs

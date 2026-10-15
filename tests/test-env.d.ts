@@ -3,7 +3,7 @@
 // TEST_MIGRATIONS 由 vitest.config.ts 以 miniflare bindings 注入，此处合并声明。
 // Vite `?raw` 资源导入：vitest 的 Workers pool 走 Vite 转换管线，`?raw` 在**构建期**内联为字符串
 // 常量，因此 workerd 里也读得到仓库文件（测试没有 node:fs）。
-// 用于 tests/render-config.unit.test.ts 直接断言真实 wrangler.toml.template 的结构契约。
+// 用于 tests/config-fork.test.ts 直接断言 wrangler.jsonc（一键发布形态配置）的结构契约。
 declare module "*?raw" {
   const content: string;
   export default content;
@@ -56,21 +56,19 @@ declare namespace Cloudflare {
      */
     BILLING_QUEUE_NAME?: string;
     /**
-     * 测试用户种子配置（dev-only）。vitest.config.ts 已 pin 两个固定邮箱；本声明是为了让
-     * tests/seed-users.test.ts 能**逐用例改写它**（09-22-seed-users-dev-only 的 AC-F3 要一个
-     * 「在 SEED_USERS 里、但尚未建号」的邮箱来证明豁免已消失 —— 固定那两个都已被前面的用例建掉，
-     * 会先撞重复邮箱）。与 withSwitch 同一纪律：只在本 isolate 内可见、try/finally 还原。
-     */
-    SEED_USERS?: string;
-    /**
      * 认证面限流绑定（09-28-auth-rate-limit-fix / security-audit F1）。**不是** vitest.config.ts 的
-     * miniflare bindings 注入 —— 它由 `vitest.config.ts` 的 `wrangler.configPath` 读**渲染产物**
-     * wrangler.toml 自动获得（`cloudflareTest` 读 wrangler 配置里的绑定），故本文件只需声明类型。
+     * miniflare bindings 注入 —— 它由 `vitest.config.ts` 的 `wrangler.configPath` 读部署配置
+     * wrangler.jsonc 自动获得（`cloudflareTest` 读 wrangler 配置里的绑定），故本文件只需声明类型。
      * 声明为可选与 src/env.d.ts 一致：中间件的 fail-open 分支要能处理 binding 缺席
      * （AC6 就在验这条），必填声明会让该用例在类型上无法表达。
      */
     AUTH_CREDENTIAL_LIMIT?: RateLimit;
     AUTH_EMAIL_LIMIT?: RateLimit;
+    /**
+     * 维护者生产 fork（wrangler.prod.jsonc，gitignored）的**原文**，vitest.config.ts 在 Node 侧读取
+     * 后注入；空串 = fork 不存在（裸仓库 clone），tests/config-fork.test.ts 的 prod-fork 组据此跳过。
+     */
+    TEST_PROD_FORK_JSON?: string;
     /** vitest.config.ts 注入的 drizzle 迁移 SQL（applyD1Migrations 用）。 */
     TEST_MIGRATIONS: D1Migration[];
   }

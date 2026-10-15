@@ -498,7 +498,7 @@ function QuickStart() {
   const guide = PROTOCOL_GUIDES[activeIndex] ?? CHAT_COMPLETIONS_GUIDE;
 
   /* base URL 的运行期取值（双域名分流，2026-09-22）：
-     - 成功：用服务端下发的 `apiBaseUrl`（prod = https://api.lmlh.net，stg = https://stg-api.lmlh.net）。
+     - 成功：用服务端下发的 `apiBaseUrl`（配置了双域名分流时即公开 API 域；未配置时为当前 origin）。
        分流后管理台域**不服务** /v1，拿 `window.location.origin` 拼出来的正好是一个访问不通的地址。
      - **未就绪（loading）：不渲染代码块**（返回 null）—— 先渲染 `${origin}${basePath}` 会把
        "短暂错误"变成"用户复制走了错误 URL"。

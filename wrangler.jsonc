@@ -1,0 +1,131 @@
+// Cloudflare Workers configuration for TokiAPI — **Deploy to Cloudflare 按钮形态**（提交入库）。
+//
+// 本文件是仓库内唯一的常驻 wrangler 配置：本地 dev / build / test（vite 插件与 vitest-pool-workers
+// 按发现顺序找到它）与一键部署（Workers Builds）共用。维护者的生产部署走 gitignored 的
+// `wrangler.prod.jsonc`（真实域名 routes + 真实资源 id + 真实个性化 vars），由
+// `npm run deploy`（scripts/deploy.mjs）自动选择：prod fork 存在则用之，否则用本文件。
+//
+// **三条写配置前必须知道的陷阱**：
+//  1. **占位资源 id 是按钮期望的形态**（官方要求配置含 "default values for resource names,
+//     resource IDs"）：Deploy to Cloudflare 会按本文件的 D1/KV/Queues 声明自动供给资源并把真实
+//     id 回写到用户仓库里的这份配置。本地 miniflare 也一直用占位 id 跑（不校验真实存在）。
+//  2. **`wrangler deploy --dry-run` 不校验 `[[queues.producers]]` 指向的队列是否存在**（2026-09-22
+//     实测）——dry-run 绿只证明配置结构合法，**不能当"资源就绪"检查**；资源就绪以账号侧实查为准
+//     （`wrangler queues list` / `wrangler kv namespace list`）。
+//  3. **queue() 按队列名精确比对分流**（src/index.ts）：`BILLING_QUEUE_NAME` 必须与
+//     `[[queues.producers]]` 里 BILLING_QUEUE 的 `queue` 字面一致，否则计费批会落进用量分支、
+//     被 usageEventSchema 拒掉 —— **静默不扣费且账上无痕**。改队列名时两处必须一起改。
+//
+// **刻意不写 routes / placement**：一键部署用户没有本仓维护者的自定义域名（声明 custom_domain
+// 会因域名不属于部署者账号而 deploy 失败）；Workers 平台默认给出 `<worker>.<subdomain>.workers.dev`
+// 子域，域分流中间件对「无法归类 host 按路径转发 + 未配置 API_DOMAIN 即整体关闭」的行为保证
+// workers.dev 开箱可用（见 src/middleware/domain-split.ts）。需要自定义域名的部署方在部署后于
+// dashboard 绑定，或改用维护者形态的 wrangler.prod.jsonc。
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cf-ai-gateway",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // --- 静态资源（M6）：Vite 构建产物（React SPA）由 Worker 托管 ---
+  // run_worker_first = true：全部请求先到 Worker（Hono 处理 /api/*、/v1/*），
+  // 其余路径由 Worker 内 env.ASSETS.fetch() 兜底托管。
+  // not_found_handling=single-page-application：React Router 深链（/login、/keys 等）回退 index.html。
+  // Workers Builds 会先执行 package.json 的 build script（vite build）产出 dist/client，再 deploy。
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "dist/client",
+    "run_worker_first": true,
+    "not_found_handling": "single-page-application"
+  },
+
+  // --- D1：事实库（users / api_keys / providers / balance_tx / request_logs / usage_daily / models） ---
+  // database_id 为占位 UUID：按钮流程自动供给后回写真实值；本地 miniflare 不校验。
+  // 迁移不随部署自动执行 —— `npm run deploy`（scripts/deploy.mjs）在 deploy 前
+  // 跑 `wrangler d1 migrations apply DB --remote`（按 **binding 名** DB 引用，官方推荐形态）。
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "cf-ai-gateway-db",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "drizzle"
+    }
+  ],
+
+  // --- KV：响应缓存 + 限流固定窗口计数器（M4 使用）---
+  "kv_namespaces": [
+    { "binding": "CACHE_KV", "id": "00000000000000000000000000000000" }
+  ],
+
+  // --- 认证面限流（09-28-auth-rate-limit-fix；security-audit 2026-09-23 的 F1 修复）---
+  // **策略（limit/period）只在这里，代码侧只传 `{ key }`** —— workerd 生成的 `RateLimitOptions`
+  // 只有 key 字段，本地 miniflare 虽接受逐调用覆写但生产无此契约。
+  // period 只能是 10 或 60（wrangler schema 的 enum）。namespace_id 是**账号级**命名空间：
+  // 不同用户各自部署到各自账号，同值不互撞；改档位改这里即可，不用改代码、不用发版。
+  "ratelimits": [
+    { "name": "AUTH_CREDENTIAL_LIMIT", "namespace_id": "1001", "simple": { "limit": 10, "period": 60 } },
+    { "name": "AUTH_EMAIL_LIMIT", "namespace_id": "1002", "simple": { "limit": 5, "period": 60 } }
+  ],
+
+  // --- Queues：用量聚合 + 延迟计费异步管道（M5 / 08-31-perf-v2）---
+  // ⚠ Queues 是 Workers Paid 计划功能：免费账号一键部署会在绑定处失败（README 前置条件已注明）。
+  // 队列名即资源名默认值（setup 页可改）；改名时同步 [vars].BILLING_QUEUE_NAME（见文件头陷阱 3）。
+  "queues": {
+    "producers": [
+      { "binding": "USAGE_QUEUE", "queue": "cf-ai-gateway-usage" },
+      { "binding": "BILLING_QUEUE", "queue": "cf-ai-gateway-billing" }
+    ],
+    "consumers": [
+      { "queue": "cf-ai-gateway-usage", "max_batch_size": 32, "max_retries": 3 },
+      { "queue": "cf-ai-gateway-billing", "max_batch_size": 32, "max_retries": 3 }
+    ]
+  },
+
+  // --- Cron：request_logs 保留期清理（M5 5.4；UTC 每日 02:00；本地 wrangler dev 不自动触发）---
+  "triggers": {
+    "crons": ["0 2 * * *"]
+  },
+
+  // --- 非敏感运行时配置（15 键，安全缺省）---
+  // 治理规则：四个真实 secret（名单见 .dev.vars.example 与 README 部署章节）**绝不进本文件**，
+  // 只走 `.dev.vars`（一键部署 setup 页输入项通道）或
+  // `wrangler secret put`。个性化值（BETTER_AUTH_URL / GITHUB_CLIENT_ID / GITHUB_ALLOWED_EMAILS）
+  // 双通道：本文件缺省 + `.dev.vars.example`（setup 页输入）；一键部署输入值的落盘形态是文档盲区，
+  // 部署后按 README「部署后收尾清单」用 Dashboard / `wrangler secret put` 兜底核对。
+  "vars": {
+    // Better Auth 站点 URL —— **同时是双域名分流的"平台域"真源**（`new URL(...).hostname`，
+    // 见 src/lib/domains.ts）。不留空：undefined 会让 `new URL()` 抛错打爆 /api/auth；
+    // localhost 是已知的错误值特征（管理面 301 到 localhost），部署后必须改成实际 origin。
+    "BETTER_AUTH_URL": "http://localhost:5173",
+    // GitHub OAuth App Client ID（非秘密）。占位 = GitHub 登录不可用直至配置（README 收尾清单）。
+    "GITHUB_CLIENT_ID": "replace-me-github-client-id",
+    // GitHub 登录白名单邮箱（逗号分隔）。**空 = 拒绝所有 GitHub 登录**（fail-closed）。
+    "GITHUB_ALLOWED_EMAILS": "",
+    // request_logs 明细保留天数（cron 清理用）
+    "REQUEST_LOG_RETENTION_DAYS": "30",
+    // 网关 API Key 明文前缀（仅影响新生成 Key）
+    "API_KEY_PREFIX": "sk-",
+    // 延迟计费队列名（queue() handler 按队列名精确比对分流；必须与上面 BILLING_QUEUE 的 queue 一致）
+    "BILLING_QUEUE_NAME": "cf-ai-gateway-billing",
+    // 全局响应缓存总开关（09-03-stg-cache-investigation）：缺省/false = 关闭（fail-closed）
+    "CACHE_ENABLED": "false",
+    // modelcap 档位乘算常数（09-16 kv-ops 档位化）：cap = BASE × MULT × 档位
+    // （src/generated/modelcaps.ts 存档位；缺省 8192 × 2 = 16384 基准；改动后需重跑 render:modelcaps + 部署）
+    "MODELCAP_BASE_TOKENS": "8192",
+    "MODELCAP_MULTIPLIER": "2",
+    // 注册赠金 / 邮箱验证赠金金额（USD，09-16-signup-bonus-grant）：缺省 5（开箱即送）；
+    // 显式设 0（或非法值）即不赠（涉及钱，非法配置 fail-safe 到少发）
+    "SIGNUP_BONUS_AMOUNT": "5",
+    "EMAIL_VERIFY_BONUS_AMOUNT": "5",
+    // 邮箱验证功能总开关：缺省 false = 系统休眠（不发验证信、不发验证赠金）
+    "EMAIL_VERIFICATION_ENABLED": "false",
+    // 账户安全总开关（09-21-email-admin-promotion-switch）：缺省/false = 邮件注册的账户不能提升为 admin
+    "EMAIL_ACCOUNT_ADMIN_PROMOTION_ENABLED": "false",
+    // 事务邮件收件人白名单（08-27-email-notification；逗号分隔）：**空 = 全放行**
+    "EMAIL_ALLOWED_RECIPIENTS": "",
+    // 公开 API 域名（双域名分流）：**空 = 分流整体关闭** = 单一 workers.dev 域的正确形态。
+    // 自定义双域名的部署方在部署后填写（并同时于 dashboard 绑定该域名）。
+    "API_DOMAIN": ""
+  }
+}

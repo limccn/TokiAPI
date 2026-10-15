@@ -48,7 +48,7 @@ export interface MailEnv {
 
 /**
  * 收件人白名单解析：逗号分隔 → trim + 小写归一 → 去空项。
- * 空/缺失 → 空数组 = **全放行**（prod 语义；staging 必须显式设置，见 deployment.md §5.1）。
+ * 空/缺失 → 空数组 = **全放行**（仅在 EMAIL_VERIFICATION_ENABLED=true 时相关；缺省关闭即通道休眠）。
  */
 export function parseEmailAllowlist(raw: string | undefined): string[] {
   if (raw === undefined) {

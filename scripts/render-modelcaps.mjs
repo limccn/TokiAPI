@@ -17,7 +17,7 @@ const OUT_PATH = resolve(ROOT, "src", "generated", "modelcaps.ts");
 const DEFAULT_BASE_TOKENS = 8192;
 const DEFAULT_MULTIPLIER = 2;
 
-// 解析 .dev.vars（KEY=VALUE + # 注释 + 引号剥离；与 render-wrangler-config.mjs 同规则）。
+// 解析 .dev.vars（KEY=VALUE + # 注释 + 引号剥离；与 .dev.vars.example 的模板规则一致）。
 function parseDotVars(file) {
   const values = {};
   if (!existsSync(file)) return values;

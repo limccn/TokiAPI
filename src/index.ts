@@ -1,4 +1,4 @@
-// AI API Gateway - Worker 入口。
+// TokiAPI - Worker 入口。
 // 中间件/路由注册顺序（Hono 按注册顺序匹配）：
 //   1. requestContext（MUST 最先挂载，注入 requestId + logger）
 //   2. domainSplit（双域名分流：按 Host 放行/互跳；未配置 API_DOMAIN 时整体关闭）
@@ -11,7 +11,7 @@
 //   7. requireSession 挂载 /api/*（未登录 401）
 //   8. 管理面模块路由（/api/users、/api/keys、/api/providers 等）
 //   9. notFound 兜底：/api/* 与 /v1/* 返回 JSON 404；其余路径交给 env.ASSETS 托管
-//      （M6 前端：SPA index.html + 构建产物；wrangler.toml assets run_worker_first=true）
+//      （M6 前端：SPA index.html + 构建产物；wrangler.jsonc assets run_worker_first=true）
 // 代理面 /v1/*（M3）：网关 Key 鉴权，独立于会话鉴权，在 requireSession 之前注册（互不冲突）。
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -23,7 +23,6 @@ import { requireSession } from "./middleware/auth";
 import { apiBaseUrl, platformBaseUrl } from "./lib/domains";
 import authRouter from "./routes/auth/router";
 import invitesRouter from "./routes/invites/router";
-import seedRouter from "./routes/seed/router";
 import usersRouter from "./routes/users/router";
 import keysRouter from "./routes/keys/router";
 import providersRouter from "./routes/providers/router";
@@ -80,7 +79,7 @@ app.use("*", async (c, next) => {
 
 // GET /api/health —— 存活探针；不触达 DB（database.md Pitfall 4：避免冷启动叠加）
 app.get("/api/health", (c) =>
-  c.json({ ok: true, service: "cf-ai-gateway", ts: new Date().toISOString() }),
+  c.json({ ok: true, service: "tokiapi", ts: new Date().toISOString() }),
 );
 
 // GET /api/config —— 公开的**运行期**前端配置（R-B14）。**必须注册在下面 requireSession 之前**
@@ -100,7 +99,8 @@ app.get("/api/config", (c) => {
 // 认证面限流（09-28-auth-rate-limit-fix / security-audit F1）：此前 /api/auth/* 零速率成本
 // （Better Auth 自带限流挂 NODE_ENV === "production"，而 Workers 里它是 undefined ⇒ 从未启用），
 // 匿名口令爆破与邮件放大都无上界。**必须在 authRouter 之前**（Hono 按注册顺序匹配）。
-// 策略（10 次 / 5 次每 60 秒）在 wrangler.toml 的 [[ratelimits]]，改档位不用改代码、不用发版。
+// 策略（10 次 / 5 次每 60 秒）在部署配置的 [[ratelimits]]（wrangler.jsonc；维护者 fork 为
+// wrangler.prod.jsonc），改档位不用改代码、不用发版。
 app.use("/api/auth/*", authRateLimit());
 
 // Better Auth（public）：必须先于 requireSession 注册
@@ -111,10 +111,6 @@ app.route("/api/auth", authRouter);
 // 限流先于路由挂载（同 /api/auth/* 的顺序纪律）：路径白名单在 auth-rate-limit.ts（credential 桶）。
 app.use("/api/invites/validate", authRateLimit());
 app.route("/api/invites", invitesRouter);
-
-// 测试用户初始化（dev-only）：POST /api/seed/users —— 必须先于 requireSession 注册；
-// 路由内部按 env.SEED_USERS 存在与否 gating（未配置 → 404，生产零暴露）
-app.route("/api/seed", seedRouter);
 
 // 代理面（M3）：/v1/* —— 网关 Key 鉴权（与 /api/* 会话鉴权并存），独立挂载
 app.route("/v1", v1Router);
@@ -192,7 +188,8 @@ export async function queue(
   _ctx: ExecutionContext,
 ): Promise<void> {
   // 按队列名分流：BILLING_QUEUE → 延迟计费消费者；其余（USAGE_QUEUE）→ 用量聚合消费者。
-  // 队列名来自 [vars]（render 烘焙）。BILLING_QUEUE_NAME 缺键时若静默走 usage 分支，
+  // 队列名来自部署配置 [vars]（wrangler.jsonc / 维护者 wrangler.prod.jsonc）。
+  // BILLING_QUEUE_NAME 缺键时若静默走 usage 分支，
   // 计费消息会被丢弃（校验失败）且不扣费 —— fail-fast：抛错让批次重试，直到配置修复。
   if (!env.BILLING_QUEUE_NAME) {
     throw new Error("BILLING_QUEUE_NAME is not configured — billing events would be lost; fix [vars] before deploying");
@@ -205,7 +202,7 @@ export async function queue(
 }
 
 // Scheduled cron（M5 5.4）：按保留期清理过期 request_logs（默认 30 天，env REQUEST_LOG_RETENTION_DAYS 可配置）。
-// wrangler.toml [triggers] crons 声明；本地 wrangler dev 不自动触发（用 --test-scheduled 或直接调用本函数验证）。
+// 部署配置 [triggers] crons 声明（wrangler.jsonc / 维护者 fork）；本地 wrangler dev 不自动触发（用 --test-scheduled 或直接调用本函数验证）。
 export async function scheduled(
   _event: ScheduledEvent,
   env: Env,

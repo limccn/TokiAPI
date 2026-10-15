@@ -13,7 +13,7 @@ export default tseslint.config(
       "scripts/**",
       "*.config.*",
       "worker-configuration.d.ts",
-      "wrangler.toml",
+      "wrangler.jsonc",
       "seed.sql",
       "package-lock.json",
     ],

@@ -36,7 +36,7 @@ export async function runRequestLogCleanup(
   let truncated = false;
 
   for (let chunk = 0; chunk < MAX_CHUNKS; chunk++) {
-    // D1 PRAGMA foreign_keys=1（本地/stg 实测）：balance_tx.ref_request_id 引用
+    // D1 PRAGMA foreign_keys=1（实测）：balance_tx.ref_request_id 引用
     // request_logs.id 且无 ON DELETE 动作 → 直接删被引用行会整批撞 FK 报错。
     // 先取本批待删 id 并置空流水追溯指针（流水行保留，仅断明细跳转），再删明细。
     const victims = await db

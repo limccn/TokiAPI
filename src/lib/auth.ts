@@ -8,10 +8,10 @@
 //   随 session 用户对象下发；inviteCode 仅允许注册时提交（input: true），写入前由 create.before 钩子剥离。
 // - user.validateUserInfo：注册/登录准入门（邀请码校验 + GitHub 白名单），
 //   通过 source.method/action 区分 email-password 注册与 GitHub OAuth 流程。
-// - **本文件不引用 SEED_USERS**（09-22-seed-users-dev-only）：此前"种子邮箱白名单直接放行"的
-//   逃生口已整体删除 —— 种子用户改由 dev-only 路由自铸一次性邀请码（src/routes/seed/router.ts），
-//   走与真实用户完全相同的校验 + 消费链路。于是生产鉴权路径中不再存在任何"靠变量没被设置"
-//   来兜底的判定，隔离是**结构性**的而非约定性的。
+// - 本文件不读任何种子用户环境开关（09-22-seed-users-dev-only）：此前"种子邮箱白名单直接放行"的
+//   逃生口已整体删除 —— dev 种子用户改由 dev-only 路由自铸一次性邀请码、走与真实用户完全相同的
+//   校验 + 消费链路（该 dev-only 路由已于 2026-10-14 一键发布适配中随整个 seed 脚手架移除）。
+//   于是生产鉴权路径中不再存在任何"靠变量没被设置"来兜底的判定，隔离是**结构性**的而非约定性的。
 //
 // 赠金与邮箱验证（09-16-signup-bonus-grant）：
 // - 注册赠金挂在 `databaseHooks.user.create.after` —— 该钩子**不区分 provider**，
