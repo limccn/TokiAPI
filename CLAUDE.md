@@ -115,7 +115,7 @@ git branch -d feat/<name>                          # ⑤ 删除
 
 > 全量从零手册：README「快速开始 + 部署后收尾清单」+ 本地 `governance/deployment.md`。
 
-- **一键部署（按钮）**：克隆仓库 → 按 `wrangler.jsonc` 自动供给 D1/KV/Queues（Queues 需 Workers Paid）→ 回写资源 id → Workers Builds 从 `main` 构建发布。**迁移不自动执行**——收尾清单第 1 步手动 `npx wrangler d1 migrations apply DB --remote`。
+- **一键部署（按钮）**：克隆仓库 → 按 `wrangler.jsonc` 自动供给 D1/KV/Queues（Free 计划即可——Queues 在 Free/Paid 均可用，Free 含 10,000 ops/天额度；2026-10-15 实证修订，此前「需 Paid」为过时断言）→ 回写资源 id → Workers Builds 从 `main` 构建发布。**迁移不自动执行**——收尾清单第 1 步手动 `npx wrangler d1 migrations apply DB --remote`。
 - **维护者生产部署**：本地生成 `wrangler.prod.jsonc`（真实 routes/id/vars；生成流程与字段表在本地 governance spec，**先加 .gitignore 再落盘**）→ `npm run deploy` 自动选中 → 探针验收。secrets 不进 fork，仍走 `wrangler secret put`。
 - **🔴 fork `[vars]` 部署前须人工核对**：实施期 fork 从本地 `.dev.vars` 生成，其中 `GITHUB_CLIENT_ID="placeholder-github-client-id"` / `GITHUB_ALLOWED_EMAILS`（本地测试邮箱）/ `EMAIL_VERIFICATION_ENABLED="true"` 是 **dev 遗留值**（真实生产值历来自部署 shell export，从未落 `.dev.vars`）。每次用 fork 部署前核对这五键（加 `BETTER_AUTH_URL` / `EMAIL_ALLOWED_RECIPIENTS`）为真实生产值；`wrangler deploy` banner 会打印解析值（`env.X ("...")` 行），据此最终确认。
 - **首个 admin 无自提升端点**：GitHub OAuth 登录（白名单内）→ 直接 D1 `UPDATE users SET role='admin' WHERE email=...`（唯一合法 bootstrap；**禁止 SQL INSERT 造用户**——Better Auth 哈希/绑定会被绕过）。无用户状态不能发邀请码，故 GitHub OAuth 是 bootstrap 唯一入口（README 收尾清单）。

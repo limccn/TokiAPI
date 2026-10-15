@@ -9,7 +9,7 @@
 
 **A self-hosted, OpenAI-compatible AI API gateway — one entry point that proxies multiple model vendors, 100% on Cloudflare, with no external services.**
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/limccn/TokiAPI)
+[![Install with Appflare](https://appflare.dev/badge.svg)](https://appflare.dev/install/?repo=limccn/TokiAPI) [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/limccn/TokiAPI)
 
 ## What is this
 
@@ -37,8 +37,14 @@ Click the button and Cloudflare clones the repository into your account, auto-pr
 
 **Prerequisites**:
 
-- A Cloudflare account on the **Workers Paid plan** — the billing/usage async pipeline uses Queues, which fails to bind on the free plan
+- A Cloudflare account (**the free plan works** — Queues is available on both Free and Paid; the free tier includes 10,000 queue operations per day, roughly 3,300 billing messages, with 24-hour message retention. Consider Paid only when you outgrow the free quota or need longer retention)
 - (Optional) A GitHub OAuth App: needed only for GitHub sign-in (which is also **the only entry point for the first admin** — see the checklist below); skip it if you only use email/password + invite codes
+
+### Option 1b: one-click install via Appflare (third-party platform)
+
+[![Install with Appflare](https://appflare.dev/badge.svg)](https://appflare.dev/install/?repo=limccn/TokiAPI)
+
+[Appflare](https://appflare.dev) is a third-party self-hosting platform for Cloudflare: install its manager Worker into your Cloudflare account once, then install catalog apps with one click from the browser. An install **provisions resources, applies D1 migrations, and fills in the site URL automatically** (checklist step 2 not needed); this repo has also been submitted to its public catalog (once accepted, the badge switches to the catalog version automatically). Until the catalog entry is packaged, the install runs as a repository build — that form **requires Workers Paid** (builds run in Cloudflare Containers, which the free plan does not include) and Building enabled in your Appflare settings.
 
 ### Option 2: manual deploy
 
@@ -53,7 +59,7 @@ Create the real resources first and write their ids back into `wrangler.jsonc` (
 ```bash
 npx wrangler d1 create cf-ai-gateway-db          # database_id → wrangler.jsonc
 npx wrangler kv namespace create CACHE_KV        # id → wrangler.jsonc
-npx wrangler queues create cf-ai-gateway-usage   # Queues require Workers Paid
+npx wrangler queues create cf-ai-gateway-usage   # Queues work on the free plan
 npx wrangler queues create cf-ai-gateway-billing
 ```
 

@@ -6,9 +6,11 @@
 // `npm run deploy`（scripts/deploy.mjs）自动选择：prod fork 存在则用之，否则用本文件。
 //
 // **三条写配置前必须知道的陷阱**：
-//  1. **占位资源 id 是按钮期望的形态**（官方要求配置含 "default values for resource names,
-//     resource IDs"）：Deploy to Cloudflare 会按本文件的 D1/KV/Queues 声明自动供给资源并把真实
-//     id 回写到用户仓库里的这份配置。本地 miniflare 也一直用占位 id 跑（不校验真实存在）。
+//  1. **占位资源 id 是双安装器期望的形态**：Deploy to Cloudflare 按钮会按本文件的 D1/KV/Queues
+//     声明自动供给资源并把真实 id 回写到用户仓库里的这份配置；Appflare（appflare.dev，第三方
+//     自托管平台）安装器对 $NAME 式占位 id 同样自动供给。本文件用 **$NAME 占位符**承载「待供给」
+//     语义（tests/config-fork.test.ts 钉住此形态；KV id 连空串都被 wrangler 校验硬拒，
+//     故统一用占位符而非空串）。本地 miniflare 不校验真实 id。
 //  2. **`wrangler deploy --dry-run` 不校验 `[[queues.producers]]` 指向的队列是否存在**（2026-09-22
 //     实测）——dry-run 绿只证明配置结构合法，**不能当"资源就绪"检查**；资源就绪以账号侧实查为准
 //     （`wrangler queues list` / `wrangler kv namespace list`）。
@@ -41,21 +43,25 @@
   },
 
   // --- D1：事实库（users / api_keys / providers / balance_tx / request_logs / usage_daily / models） ---
-  // database_id 为占位 UUID：按钮流程自动供给后回写真实值；本地 miniflare 不校验。
+  // database_id 用 $NAME 占位符 = 「待供给」语义：Deploy to Cloudflare 按钮流程自动供给后回写
+  // 真实值；Appflare（第三方自托管平台）安装器对 $NAME/$绝对占位符同样自动供给（2026-10-15 适配）；
+  // 本地 miniflare 不校验真实存在（仅要求非空字符串 —— KV 侧连空串都被 wrangler 硬拒，
+  // 故不用空串形态，两资源统一 $NAME 占位）。
   // 迁移不随部署自动执行 —— `npm run deploy`（scripts/deploy.mjs）在 deploy 前
-  // 跑 `wrangler d1 migrations apply DB --remote`（按 **binding 名** DB 引用，官方推荐形态）。
+  // 跑 `wrangler d1 migrations apply DB --remote`（按 **binding 名** DB 引用，官方推荐形态）；
+  // Appflare 安装器则自动执行 migrations_dir 下的迁移。
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "cf-ai-gateway-db",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "$TOKIAPI_D1_ID",
       "migrations_dir": "drizzle"
     }
   ],
 
   // --- KV：响应缓存 + 限流固定窗口计数器（M4 使用）---
   "kv_namespaces": [
-    { "binding": "CACHE_KV", "id": "00000000000000000000000000000000" }
+    { "binding": "CACHE_KV", "id": "$TOKIAPI_KV_ID" }
   ],
 
   // --- 认证面限流（09-28-auth-rate-limit-fix；security-audit 2026-09-23 的 F1 修复）---
@@ -69,8 +75,11 @@
   ],
 
   // --- Queues：用量聚合 + 延迟计费异步管道（M5 / 08-31-perf-v2）---
-  // ⚠ Queues 是 Workers Paid 计划功能：免费账号一键部署会在绑定处失败（README 前置条件已注明）。
-  // 队列名即资源名默认值（setup 页可改）；改名时同步 [vars].BILLING_QUEUE_NAME（见文件头陷阱 3）。
+  // Queues 在 Workers Free 与 Paid 计划均可用（官方 "Available on Free and Paid plans"；
+  // 2026-10-15 实证：本仓生产队列在免费账号正常运行）。差异是额度与保留期：
+  // Free 10,000 ops/天（≈3,300 条计费消息）+ 消息保留 24h（不可配置）；Paid 100 万 ops/月 +
+  // 保留默认 4 天可调 14 天。队列名即资源名默认值（setup 页可改）；
+  // 改名时同步 [vars].BILLING_QUEUE_NAME（见文件头陷阱 3）。
   "queues": {
     "producers": [
       { "binding": "USAGE_QUEUE", "queue": "cf-ai-gateway-usage" },
