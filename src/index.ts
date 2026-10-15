@@ -1,4 +1,4 @@
-// AI API Gateway - Worker 入口。
+// TokiAPI - Worker 入口。
 // 中间件/路由注册顺序（Hono 按注册顺序匹配）：
 //   1. requestContext（MUST 最先挂载，注入 requestId + logger）
 //   2. domainSplit（双域名分流：按 Host 放行/互跳；未配置 API_DOMAIN 时整体关闭）
@@ -79,7 +79,7 @@ app.use("*", async (c, next) => {
 
 // GET /api/health —— 存活探针；不触达 DB（database.md Pitfall 4：避免冷启动叠加）
 app.get("/api/health", (c) =>
-  c.json({ ok: true, service: "cf-ai-gateway", ts: new Date().toISOString() }),
+  c.json({ ok: true, service: "tokiapi", ts: new Date().toISOString() }),
 );
 
 // GET /api/config —— 公开的**运行期**前端配置（R-B14）。**必须注册在下面 requireSession 之前**

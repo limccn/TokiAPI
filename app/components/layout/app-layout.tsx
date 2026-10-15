@@ -134,7 +134,7 @@ export function AppLayout() {
 
 function LinkBrand({ compact = false }: { compact?: boolean }) {
   return (
-    <NavLink to="/dashboard" className="flex items-center gap-2" title="AI API Gateway">
+    <NavLink to="/dashboard" className="flex items-center gap-2" title="TokiAPI">
       <ShieldCheck className="size-5 shrink-0 text-primary" aria-hidden="true" />
       <span
         className={cn(
@@ -142,7 +142,7 @@ function LinkBrand({ compact = false }: { compact?: boolean }) {
           compact ? "hidden lg:inline" : "inline",
         )}
       >
-        AI API Gateway
+        TokiAPI
       </span>
     </NavLink>
   );

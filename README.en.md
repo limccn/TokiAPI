@@ -1,15 +1,15 @@
-# AI API Gateway
+# TokiAPI
 
-![AI API Gateway](doc/banner.png)
+![TokiAPI](doc/banner.png)
 
-[![CI](https://github.com/limccn/cf-ai-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/limccn/cf-ai-gateway/actions/workflows/ci.yml)
+[![CI](https://github.com/limccn/TokiAPI/actions/workflows/ci.yml/badge.svg)](https://github.com/limccn/TokiAPI/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **[中文](README.md) | English**
 
 **A self-hosted, OpenAI-compatible AI API gateway — one entry point that proxies multiple model vendors, 100% on Cloudflare, with no external services.**
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/limccn/cf-ai-gateway)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/limccn/TokiAPI)
 
 ## What is this
 
@@ -31,7 +31,7 @@ For individuals and teams who want to manage multiple model vendors in one place
 
 ### Option 1: one-click deploy (recommended)
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/limccn/cf-ai-gateway)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/limccn/TokiAPI)
 
 Click the button and Cloudflare clones the repository into your account, auto-provisions the D1 / KV / Queues resources declared in `wrangler.jsonc` (real resource ids are written back into your copy of the config), and hands builds and releases to Workers Builds. Secrets and personalized values are entered on the setup page (the keys listed in `.dev.vars.example`).
 
@@ -43,7 +43,7 @@ Click the button and Cloudflare clones the repository into your account, auto-pr
 ### Option 2: manual deploy
 
 ```bash
-git clone <your-repo-url> cf-ai-gateway && cd cf-ai-gateway
+git clone <your-repo-url> tokiapi && cd tokiapi
 npm install
 cp .dev.vars.example .dev.vars   # local dev values (local real secrets; deploys use secret put — see below)
 ```
@@ -157,8 +157,8 @@ Both authentication headers (`Authorization: Bearer` and Anthropic's native `x-a
 **Requirements**: Node.js ≥ 20 and npm; no Cloudflare account is needed for local development.
 
 ```bash
-git clone <your-repo-url> cf-ai-gateway
-cd cf-ai-gateway
+git clone <your-repo-url> tokiapi
+cd tokiapi
 npm install
 
 # 1. Create the local values file from the committed template (gitignored)
