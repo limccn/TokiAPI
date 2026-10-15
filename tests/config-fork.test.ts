@@ -135,6 +135,24 @@ describe("wrangler.jsonc（按钮形态）结构契约", () => {
     expect(Object.keys(vars).sort()).toEqual(VARS_WHITELIST);
   });
 
+  it("资源 id 为「待供给」占位形态（双安装器契约：Deploy 按钮 + Appflare）", () => {
+    // 提交形态的 D1 database_id / KV id 必须是 Appflare 可识别的显式占位符
+    // （$NAME / ${NAME} / {{NAME}} / <NAME>）——两个安装器都会对它自动供给真实资源；
+    // 真实 id 只允许出现在 gitignored 的 wrangler.prod.jsonc。
+    // 形态依据：appflare.dev/catalog/submit/（kv/r2/d1 的 id 允许空串或上述占位符）。
+    // 实证补注（2026-10-15）：wrangler 对 KV id 显式拒绝空串（length===0 报错），
+    // 故排除空串形态，统一用 $NAME 占位 —— wrangler 侧任何非空串均通过校验。
+    // ${NAME}/{{NAME}} 形态会与下方「无 {TOKEN} 渲染占位残留」护栏冲突，同样排除。
+    const placeholderRe = /^\$[A-Z][A-Z_0-9]*$|^<[A-Z][A-Z_0-9]*>$/;
+    for (const [label, value] of [
+      ["d1_databases[0].database_id", d1.database_id],
+      ["kv_namespaces[0].id", kv.id],
+    ] as const) {
+      const s = String(value);
+      expect(placeholderRe.test(s), `${label} 必须为待供给占位符（$NAME / <NAME>），实际值「${s}」疑似真实资源 id`).toBe(true);
+    }
+  });
+
   it("无 routes / 无 [env.*] / 无 placement（按钮形态 = 无自定义域名、无环境段）", () => {
     expect(cfg).not.toHaveProperty("routes");
     expect(cfg).not.toHaveProperty("env");
@@ -193,16 +211,20 @@ describe("维护者 prod fork（wrangler.prod.jsonc，存在时）", () => {
     expect(fAssets.binding).toBe("ASSETS");
     expect(fAssets.directory).toBe("dist/client");
 
-    // d1 / kv：binding 同名，id 必须脱离占位（占位 id 是按钮形态专属；fork 是真资源）
+    // d1 / kv：binding 同名，id 必须脱离占位（占位/空串 id 是提交形态专属；fork 是真资源）
+    // 注意 fork 侧 id 可为空串之外任何形态——真实部署前必须已回填真实 id，故只断言
+    // 与 jsonc 的「待供给」值不同且非零 UUID（空串也不行：fork 无安装器代为供给）。
     const fD1 = f.d1_databases as Array<Record<string, unknown>>;
     const fD1First = firstOf(fD1);
     expect(fD1.map((d) => d.binding)).toContain("DB");
     expect(fD1First.database_id).not.toBe(d1.database_id);
+    expect(String(fD1First.database_id)).not.toBe("");
     expect(String(fD1First.database_id)).not.toMatch(/^0+(-0+)+$/);
     const fKv = f.kv_namespaces as Array<Record<string, unknown>>;
     const fKvFirst = firstOf(fKv);
     expect(fKv.map((k) => k.binding)).toContain("CACHE_KV");
     expect(fKvFirst.id).not.toBe(kv.id);
+    expect(String(fKvFirst.id)).not.toBe("");
 
     // queues：producers bindings ⊇ jsonc；BILLING_QUEUE_NAME 分流不变式同样成立
     const fQueues = f.queues as typeof queues;
