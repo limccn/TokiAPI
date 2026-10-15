@@ -2,11 +2,11 @@
 //
 // 被测对象是 scripts/lib/modelcap-grid.mjs —— 特意抽成零依赖纯函数：它同时被 Node 侧的
 // scripts/render-modelcaps.mjs import，而 vitest 跑在 Workers pool（workerd）里没有 node:fs，
-// 谓词留在那个脚本里就**测不到**（同 tests/render-config.unit.test.ts 对 toml-sections.mjs 的处理）。
+// 谓词留在那个脚本里就**测不到** —— 这正是把它抽成零依赖文件的原因。
 //
 // 为什么值得锁：这个谓词是**构建期的唯一闸门**。放宽成「任意正数」= 闸门消失，网格外的 cap
 // 会静默进入生成物（管理台的下拉届时选不中任何一项）；收紧回「整数档」= 管理台下拉的 0.5x
-// 会让 predev / pretest / predeploy 全部 fail-fast（它们都真跑 render:config，无 --check）。
+// 会让 npm run render:modelcaps 直接 fail-fast（档位表再生不了，须先调常数再放宽谓词）。
 // 两个方向都得有断言，否则「改成恒真」也能全绿。
 import { describe, expect, it } from "vitest";
 import { deriveTier, isGridTier } from "../scripts/lib/modelcap-grid.mjs";

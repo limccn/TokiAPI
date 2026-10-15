@@ -18,16 +18,16 @@
 //      2×limit+1 保证**无论是否跨界都必然撞出至少一个 429**；「恰好第 limit+1 次转 429」
 //      这条强断言只在确认未跨界的常见路径上追加（AC1）。
 //
-// 档位常量与 wrangler.toml 的 [[ratelimits]] 由 tests/render-config.unit.test.ts 的
+// 档位常量与 wrangler.jsonc 的 [[ratelimits]] 由 tests/config-fork.test.ts 的
 // 「[[ratelimits]] 结构契约」钉住；两处必须一起改。
 import { env } from "cloudflare:test";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { applyMigrations, selfFetch } from "./helpers";
 import { authRateLimitBucket, RETRY_AFTER_SECONDS } from "../src/middleware/auth-rate-limit";
 
-/** 凭据类桶的 limit（wrangler.toml AUTH_CREDENTIAL_LIMIT.simple.limit）。 */
+/** 凭据类桶的 limit（wrangler.jsonc AUTH_CREDENTIAL_LIMIT.simple.limit）。 */
 const CREDENTIAL_LIMIT = 10;
-/** 邮件类桶的 limit（wrangler.toml AUTH_EMAIL_LIMIT.simple.limit）。 */
+/** 邮件类桶的 limit（wrangler.jsonc AUTH_EMAIL_LIMIT.simple.limit）。 */
 const EMAIL_LIMIT = 5;
 
 /** 假 IP：文档保留段 203.0.113.0/24（RFC 5737），逐用例递增。 */

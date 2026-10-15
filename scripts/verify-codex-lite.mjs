@@ -11,8 +11,10 @@
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-// stg 模式（E2E_STG=1）：BASE 指 stg 管理面、API_BASE 指 stg 公开 API 面（双域名分流），
-// D1 用 --remote --env staging（仿 stg-e2e-verify.mjs）
+// stg 模式（E2E_STG=1，**遗留 / 已随 stg 脚手架拆除失效**）：BASE 指 stg 管理面、API_BASE 指
+// stg 公开 API 面；D1 用 --remote --env staging —— stg 配置段已不存在（wrangler.toml 已删、
+// wrangler.prod.jsonc 无 [env]），此模式会 fail-fast 而非误打生产；保留仅为历史调用记忆，
+// 退役 runbook 见 .trellis/spec/governance/stg-retirement.md
 const STG = process.env.E2E_STG === "1";
 const BASE = STG ? "https://stg-platform.lmlh.net" : (process.env.BASE_URL ?? "http://localhost:5173");
 // 公开 API 面（/v1、/anthropic）走独立域；本地模式下分流关闭（环回例外）⇒ 两者同域。

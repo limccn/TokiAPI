@@ -55,7 +55,7 @@ function check(name, ok, detail = "") {
 
 function q(sql) {
   const out = execFileSync(process.execPath,
-    [WRANGLER_JS, "d1", "execute", DB, "--local", "--config", "wrangler.toml",
+    [WRANGLER_JS, "d1", "execute", DB, "--local", "--config", "wrangler.jsonc",
       "--command", sql, "--json"], { encoding: "utf8", cwd: ROOT });
   return JSON.parse(out)[0]?.results ?? [];
 }
@@ -143,7 +143,7 @@ async function main() {
   // 0. 本地 D1 迁移（幂等；drizzle 新迁移如 0005 http_options_enc 需先于 dev 应用）
   try {
     execFileSync(process.execPath,
-      [WRANGLER_JS, "d1", "migrations", "apply", DB, "--local", "--config", "wrangler.toml"],
+      [WRANGLER_JS, "d1", "migrations", "apply", DB, "--local", "--config", "wrangler.jsonc"],
       { encoding: "utf8", cwd: ROOT, stdio: "pipe" });
   } catch (error) {
     console.error("[E2E] 迁移失败:", String(error));

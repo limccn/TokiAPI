@@ -38,7 +38,7 @@ interface DomainConfig {
   betterAuthUrl: string;
 }
 
-/** 与线上逐字一致的两套配置：prod（顶层段 ← .dev.vars）与 stg（环境段 ← .dev.vars.staging）。 */
+/** 两套线上形态的**夹具配置**（stg 脚手架拆除后保留：分流断言的判别力靠两套域名两两不等）。 */
 const PROD: DomainConfig = {
   apiDomain: "api.lmlh.net",
   betterAuthUrl: "https://platform.lmlh.net",
@@ -48,8 +48,8 @@ const STG: DomainConfig = {
   betterAuthUrl: "https://stg-platform.lmlh.net",
 };
 /**
- * **本地 dev 的真实形态**（不是 `withSplitDisabled`）：`.dev.vars` 同时承载生产值
- * （spec config-inventory §1），故 `API_DOMAIN` 是**真公网域名**，只有 `BETTER_AUTH_URL` 是 localhost。
+ * **本地 dev 的真实形态**（不是 `withSplitDisabled`）：本地 `.dev.vars` 可给 `API_DOMAIN`
+ * 一个真公网域名（在本地演练分流），只有 `BETTER_AUTH_URL` 是 localhost。
  * 这一套配置是环回例外存在的原因，也是它必须覆盖**下发路径**的原因（见 AC-B9 的环回用例）。
  */
 const LOCAL_DEV: DomainConfig = {
@@ -222,8 +222,8 @@ describe("AC-B7 别名/旧域/无关 host 按路径转发（刻意行为）", ()
     });
   });
 
-  // prod 的旧域与 stg 同构：router.lmlh.net 保留绑定，旧 base_url / 书签零改动继续可用
-  // （poster 用 308 保住方法与 body；SDK 跟随重定向后拿到的仍是业务响应）。
+  // prod 的旧域与 stg 同构（router.lmlh.net 为**夹具旧域**）：绑到本 Worker 的旧域名上，
+  // 旧 base_url / 书签零改动继续可用（poster 用 308 保住方法与 body；SDK 跟随重定向后拿到的仍是业务响应）。
   it("prod 旧域 router.lmlh.net：API 面 → api，其余 → platform", async () => {
     await withDomains(PROD, async () => {
       const v1 = await fetchManual("https://router.lmlh.net/v1/models");

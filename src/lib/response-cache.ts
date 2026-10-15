@@ -17,9 +17,9 @@ export const CACHE_HIT_THRESHOLD = 2;
 export const CACHE_HIT_WINDOW_SECONDS = 600;
 
 /**
- * 全局响应缓存总开关（09-03-stg-cache-investigation）：CACHE_ENABLED env（[vars] 烘焙）为
+ * 全局响应缓存总开关（09-03-stg-cache-investigation）：CACHE_ENABLED env（部署配置 [vars]，缺省 false）为
  * true/1/yes/on（大小写不敏感）才允许缓存参与；缺省/其他值 = 关闭 —— 即使 key.cacheEnabled=true
- * 也不命中/不写入。默认关闭：缓存是新机制，按环境显式开启（staging 在 .dev.vars.staging 中给同名键 CACHE_ENABLED）。
+ * 也不命中/不写入。默认关闭：缓存是新机制，按环境显式开启（wrangler.jsonc 缺省 false，本地 .dev.vars 可覆盖）。
  */
 export function isGlobalCacheEnabled(raw: string | undefined): boolean {
   const v = raw?.trim().toLowerCase();

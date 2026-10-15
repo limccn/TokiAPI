@@ -82,7 +82,7 @@ function insertKeys(memberId, now, name, plaintexts) {
     rows.push(`(${memberId}, '${name}', '${kh}', '${k.slice(0, 8)}', 'active', 60, 0, 3600, ${now})`);
   }
   const out = execFileSync(process.execPath,
-    [WRANGLER_JS, "d1", "execute", DB, "--local", "--config", "wrangler.toml",
+    [WRANGLER_JS, "d1", "execute", DB, "--local", "--config", "wrangler.jsonc",
       "--command",
       `INSERT INTO api_keys (user_id, name, hash, prefix, status, qps_limit, cache_enabled, cache_ttl, created_at) VALUES ${rows.join(",")} RETURNING id, name;`,
       "--json"], { encoding: "utf8", cwd: ROOT });
@@ -91,7 +91,7 @@ function insertKeys(memberId, now, name, plaintexts) {
 
 function q(sql) {
   const out = execFileSync(process.execPath,
-    [WRANGLER_JS, "d1", "execute", DB, "--local", "--config", "wrangler.toml",
+    [WRANGLER_JS, "d1", "execute", DB, "--local", "--config", "wrangler.jsonc",
       "--command", sql, "--json"], { encoding: "utf8", cwd: ROOT });
   return JSON.parse(out)[0]?.results ?? [];
 }

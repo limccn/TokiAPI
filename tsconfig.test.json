@@ -6,7 +6,7 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "types": ["@cloudflare/vitest-pool-workers/types", "@cloudflare/workers-types"],
-    // 测试要 import 纯 JS 模块 scripts/lib/toml-sections.mjs（段判定逻辑与 Node 侧渲染脚本共用）；
+    // 测试要 import 纯 JS 模块 scripts/lib/modelcap-grid.mjs（档位网格谓词，与 render-modelcaps.mjs 共用）；
     // 开 allowJs 让 tsc 直接从 .mjs 推断类型，避免手写一份会漂移的 .d.mts 声明。
     // 只影响 tests 这一侧，且 noEmit 已开 —— 不产出、不改变运行时。
     "allowJs": true

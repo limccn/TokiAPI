@@ -42,7 +42,7 @@ export type AuthRateLimitBucket = "credential" | "email";
  * `callback/*` 锁死会把用户关在门外、`verify-email` 不外发邮件故不是放大面。
  */
 const BUCKET_BY_PATH: ReadonlyMap<string, AuthRateLimitBucket> = new Map([
-  // credential：10 次 / 60s / IP（档位在 wrangler.toml 改，不用改代码）
+  // credential：10 次 / 60s / IP（档位在部署配置 [[ratelimits]] 改——wrangler.jsonc / 维护者 fork，不用改代码）
   ["/api/auth/sign-in/email", "credential"],
   ["/api/auth/sign-in/social", "credential"],
   // email：5 次 / 60s / IP —— 比 credential 更紧，因为每次命中都会真的发出邮件
@@ -51,7 +51,7 @@ const BUCKET_BY_PATH: ReadonlyMap<string, AuthRateLimitBucket> = new Map([
   ["/api/auth/sign-up/email", "email"],
   // 批次 U（D30）：注册页邀请码预校验（GET /api/invites/validate，**匿名可打**）——
   // 不在 better-auth 路径表内（上面几条才是逐条比对 createAuthEndpoint 的产物）。
-  // 按「凭据猜测」口径压进 credential 桶：复用 AUTH_CREDENTIAL_LIMIT binding ⇒ 零 toml 改动。
+  // 按「凭据猜测」口径压进 credential 桶：复用 AUTH_CREDENTIAL_LIMIT binding ⇒ 零配置改动。
   // 与登录共享计数（校验 1 次 + 登录 ≤9 次每分钟）—— 副作用已由 prd D30 认可。
   ["/api/invites/validate", "credential"],
 ]);
