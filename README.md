@@ -9,7 +9,7 @@
 
 **自托管的 OpenAI 兼容 AI API 网关——一个入口代理多家模型供应商，100% 运行在 Cloudflare 上，无需任何外部服务。**
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/limccn/TokiAPI)
+[![Install with Appflare](https://appflare.dev/badge.svg)](https://appflare.dev/install/?repo=limccn/TokiAPI) [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/limccn/TokiAPI)
 
 ## 这是什么
 
@@ -37,8 +37,14 @@
 
 **前置条件**：
 
-- Cloudflare 账号 + **Workers Paid（付费）计划**——计费/用量的异步管道使用 Queues，免费计划会在绑定处失败
+- Cloudflare 账号（**免费计划即可**——Queues 在 Free/Paid 均可用；Free 含每天 10,000 次队列操作额度，约 3,300 条计费消息，消息保留 24 小时。用量超出免费额度或需要更长保留期时再考虑 Paid）
 - （可选）GitHub OAuth App：需要 GitHub 登录（也是**首个管理员的唯一入口**，见收尾清单）才需要；只用邮箱密码 + 邀请码可跳过
+
+### 方式一·乙：Appflare 一键安装（第三方平台）
+
+[![Install with Appflare](https://appflare.dev/badge.svg)](https://appflare.dev/install/?repo=limccn/TokiAPI)
+
+[Appflare](https://appflare.dev) 是第三方 Cloudflare 自托管应用平台：把一个管理 Worker 装进你的 Cloudflare 账号后，即可从浏览器目录一键安装应用。安装时**自动供给资源、自动执行 D1 迁移、自动把站点 URL 填成实际地址**（无需收尾清单第 2 步）；本仓也已提交至其公共目录（收录后徽章会自动切到目录版）。仓库尚未被打包收录前，安装按「从仓库构建」进行——该形态**需要 Workers Paid**（构建跑在 Cloudflare Containers 里，免费计划不含），且需在你的 Appflare 设置里开启 Building。
 
 ### 方式二：手动部署
 
@@ -53,7 +59,7 @@ cp .dev.vars.example .dev.vars   # 本地开发值（真实 secrets 本地值；
 ```bash
 npx wrangler d1 create cf-ai-gateway-db          # database_id → wrangler.jsonc
 npx wrangler kv namespace create CACHE_KV        # id → wrangler.jsonc
-npx wrangler queues create cf-ai-gateway-usage   # Queues 需 Workers Paid
+npx wrangler queues create cf-ai-gateway-usage   # Queues 免费计划可用
 npx wrangler queues create cf-ai-gateway-billing
 ```
 
