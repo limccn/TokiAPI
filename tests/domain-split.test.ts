@@ -200,9 +200,13 @@ describe("AC-B3/B4/B5 管理台域：放行管理面与 SPA、API 面去 api 域
 });
 
 // ============================================================ 别名 / 旧域转发（AC-B7）
+//
+// 旧域 router.lmlh.net / stg-router.lmlh.net 已于 2026-10-16 退役（route 摘除 + DNS 删除）。
+// 下面用例把它们作**合成夹具 host** 保留（fetchManual 自取响应，不走 DNS）——中间件的
+// 「未知 host 按路径转发」行为与任何具体域名无关，域名只提供判别力（两两不等）。
 
 describe("AC-B7 别名/旧域/无关 host 按路径转发（刻意行为）", () => {
-  it("stg 旧域 stg-router.lmlh.net：API 面 → stg-api，其余 → stg-platform", async () => {
+  it("stg 旧域 stg-router.lmlh.net（2026-10-16 已退役的合成夹具）：API 面 → stg-api，其余 → stg-platform", async () => {
     await withDomains(STG, async () => {
       const v1 = await fetchManual("https://stg-router.lmlh.net/v1/models");
       expect(v1.status).toBe(301);
@@ -222,9 +226,10 @@ describe("AC-B7 别名/旧域/无关 host 按路径转发（刻意行为）", ()
     });
   });
 
-  // prod 的旧域与 stg 同构（router.lmlh.net 为**夹具旧域**）：绑到本 Worker 的旧域名上，
-  // 旧 base_url / 书签零改动继续可用（poster 用 308 保住方法与 body；SDK 跟随重定向后拿到的仍是业务响应）。
-  it("prod 旧域 router.lmlh.net：API 面 → api，其余 → platform", async () => {
+  // prod 的旧域与 stg 同构（router.lmlh.net 为**夹具旧域**，2026-10-16 已退役）：
+  // 绑到本 Worker 的旧域名上，旧 base_url / 书签零改动继续可用
+  // （poster 用 308 保住方法与 body；SDK 跟随重定向后拿到的仍是业务响应）。
+  it("prod 旧域 router.lmlh.net（2026-10-16 已退役的合成夹具）：API 面 → api，其余 → platform", async () => {
     await withDomains(PROD, async () => {
       const v1 = await fetchManual("https://router.lmlh.net/v1/models");
       expect(v1.status).toBe(301);
