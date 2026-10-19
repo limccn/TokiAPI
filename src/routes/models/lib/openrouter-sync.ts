@@ -13,7 +13,13 @@
 // 按钮（procedures/sync-openrouter.ts）只做 fetch + 调本模块 + 回显明细；
 // 计费/maxOutputTokens/freeMode/hiddenFromMembers 一概不碰。
 
-/** 网关裸 id → OR 厂商前缀（设计表;只收主流厂商,`:batch`/`:free` 等变体在 slug 匹配前先排除）。 */
+/**
+ * 网关裸 id → OR 厂商前缀表。
+ *
+ * ⚠ 查表键是**厂商名**（claude/gpt/deepseek/...），推导在 `vendorOf` 里做——不能简单
+ * 用 `id.split("-")[0]` 直接查：`qwen3.8-flash` 的首段是 `qwen3.8`、`hy4-preview` 的首段是
+ * `hy4`，都不在表里，会被误判成 `no-slug`（2026-10-19 stg 实走实证：28 行里 4 行中招）。
+ */
 const VENDOR_PREFIX: Readonly<Record<string, string>> = {
   claude: "anthropic",
   gpt: "openai",
@@ -25,6 +31,29 @@ const VENDOR_PREFIX: Readonly<Record<string, string>> = {
   kimi: "moonshotai",
   minimax: "minimax",
 };
+
+/**
+ * 从网关 id 推出厂商前缀（最长前缀匹配；无则 null）。
+ *
+ * 逐个 `-` 片段累加成候选，每轮尝试三种形态查表：
+ *   ① 候选原样            `qwen3.8` → ×
+ *   ② 去掉尾部数字/点号    `qwen3.8` → `qwen` ✓
+ *   ③ 去掉尾部纯数字       `hy4` → `hy` ✓
+ * 由此 `qwen3.8-flash`→qwen、`hy4-preview`→hy、`gpt-6-sol`→gpt、`minimax-m3`→minimax 全部命中。
+ */
+function vendorOf(model: string): string | null {
+  const segments = model.split("-");
+  let candidate = "";
+  for (const seg of segments) {
+    candidate = candidate === "" ? seg : `${candidate}-${seg}`;
+    const bases = [candidate, candidate.replace(/[\d.]+$/, ""), candidate.replace(/\d+$/, "")];
+    for (const base of bases) {
+      const vendor = VENDOR_PREFIX[base];
+      if (vendor !== undefined) return vendor;
+    }
+  }
+  return null;
+}
 
 /** 显式锚（OR 无精确 slug 的两行,用户裁决 2026-10-16）:网关 model → OR slug,优先于前缀推导。 */
 const SLUG_OVERRIDES: Readonly<Record<string, string>> = {
@@ -88,10 +117,8 @@ export function gatewayModelToSlug(model: string): string | null {
   if (SLUG_OVERRIDES[model] !== undefined) {
     return SLUG_OVERRIDES[model];
   }
-  // 前缀取 id 第一段（'claude-opus-5' → 'claude';'3.5-turbo' 这类数字开头的 id 不在前缀表,自然 miss）
-  const prefix = model.split("-")[0] ?? "";
-  const vendor = VENDOR_PREFIX[prefix];
-  return vendor === undefined ? null : `${vendor}/${model}`;
+  const vendor = vendorOf(model);
+  return vendor === null ? null : `${vendor}/${model}`;
 }
 
 /** OR pricing 单价串（USD/token）→ USD/M 数值;空/非法返回 null。（seed.sql / procedure 共用映射,勿单侧改公式） */

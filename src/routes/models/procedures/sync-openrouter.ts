@@ -22,6 +22,13 @@ import { syncOpenrouterOutputSchema, type SyncOpenrouterOutput } from "../types"
 const OR_MODELS_URL = "https://openrouter.ai/api/v1/models";
 const OR_FETCH_TIMEOUT_MS = 15_000;
 
+/**
+ * D1 单语句绑定参数上限 = 100（实测:12 列 × 12 行 = 144 参数直接 fail）。
+ * models 表本插入列数为 12（含 id 的 null 占位）⇒ 一次最多 8 行（96 参数）。
+ * 留一档余量用 8,而不是掐着 100 算 —— 将来加列时不会立刻撞线。
+ */
+const INSERT_CHUNK_SIZE = 8;
+
 export function syncOpenrouterRoute(app: Hono<AppEnv>): void {
   app.post("/sync-openrouter", async (c) => {
     const logger = c.get("logger");
@@ -106,12 +113,16 @@ export function syncOpenrouterRoute(app: Hono<AppEnv>): void {
         };
       })
       .filter((r): r is NonNullable<typeof r> => r !== null);
-    if (insertRows.length > 0) {
-      const res = await db.insert(models).values(insertRows).returning({ id: models.id });
-      inserted = res.length;
+    // ⚠ 必须分批:白名单 17 行全缺时一次插 17 行会撞 D1 参数上限（stg 实走已实证 500）。
+    for (let i = 0; i < insertRows.length; i += INSERT_CHUNK_SIZE) {
+      const chunk = insertRows.slice(i, i + INSERT_CHUNK_SIZE);
+      const res = await db.insert(models).values(chunk).returning({ id: models.id });
+      inserted += res.length;
     }
     // 并发兜底:两 admin 同时点按钮、白名单行撞唯一约束 ⇒ 第二个请求 500,但重放即幂等
     // （行已在库 ⇒ 并入 UPDATE 路径）,无需专门的 409 语义。
+    // ⚠ 注意:UPDATE 在 INSERT 之前、且不包事务 —— 中途失败会出现「价已刷、行未插」的
+    // 半完成态。重放安全（UPDATE 幂等、INSERT 跳过已存在行）,故不引入事务。
 
     // ⑤ 回显明细（含 skipped reasons;源 URL 供审计回溯）
     const outcome: SyncOutcome = { synced, inserted, skipped: plan.skipped };
