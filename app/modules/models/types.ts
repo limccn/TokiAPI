@@ -3,9 +3,10 @@ import type {
   ModelResponse,
   CreateModelInput,
   UpdateModelInput,
+  SyncOpenrouterOutput,
 } from "../../../src/routes/models/types";
 
-export type { ModelResponse, CreateModelInput, UpdateModelInput };
+export type { ModelResponse, CreateModelInput, UpdateModelInput, SyncOpenrouterOutput };
 
 export interface ListModelsOutput {
   success: true;

@@ -98,8 +98,31 @@ export const deleteModelOutputSchema = z.object({
   success: z.literal(true),
 });
 
+// ============= OpenRouter 同步（10-16-openrouter-price-sync，design §4.1）=============
+
+/** 同步跳过明细（reason 稳定字符串：前端/日志可按值分支，勿改措辞）。 */
+export const syncSkippedSchema = z.object({
+  model: z.string(),
+  reason: z.string(),
+});
+
+export const syncOpenrouterOutputSchema = z.object({
+  success: z.literal(true),
+  /** 已有行被刷价的条数。 */
+  synced: z.number().int().min(0),
+  /** 白名单新插的行数（幂等：行已存在时 0）。 */
+  inserted: z.number().int().min(0),
+  /** 未匹配/跳过明细（no-slug / missing-from-or / no-text-pricing / allowlist-missing-from-or）。 */
+  skipped: z.array(syncSkippedSchema),
+  /** 价格基准源（审计回溯用；当前恒 "openrouter"）。 */
+  source: z.string(),
+  /** 本次 OR 目录抓取时刻（ISO）。 */
+  fetchedAt: z.string(),
+});
+
 // ============= 类型导出 =============
 
 export type CreateModelInput = z.infer<typeof createModelInputSchema>;
 export type UpdateModelInput = z.infer<typeof updateModelInputSchema>;
 export type ModelResponse = z.infer<typeof modelResponseSchema>;
+export type SyncOpenrouterOutput = z.infer<typeof syncOpenrouterOutputSchema>;
