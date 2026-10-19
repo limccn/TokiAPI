@@ -51,19 +51,26 @@ describe("gatewayModelToSlug：前缀推导 + 显式锚", () => {
     expect(gatewayModelToSlug("gpt-6-sol")).toBe("openai/gpt-6-sol");
     expect(gatewayModelToSlug("glm-5.3-prime")).toBe("z-ai/glm-5.3-prime");
     expect(gatewayModelToSlug("mimo-v2.6-pro")).toBe("xiaomi/mimo-v2.6-pro");
+    expect(gatewayModelToSlug("minimax-m3")).toBe("minimax/minimax-m3");
   });
+
+  it("厂商名紧贴版本号的 id 必须命中（2026-10-19 stg 实证回归）", () => {
+    // 这批在首版实现里全被 split("-")[0] 误判成 no-slug —— 28 行里 4 行
+    expect(gatewayModelToSlug("qwen3.8-flash")).toBe("qwen/qwen3.8-flash");
+    expect(gatewayModelToSlug("qwen3.8-27b")).toBe("qwen/qwen3.8-27b");
+    expect(gatewayModelToSlug("hy3")).toBe("tencent/hy3");
+    expect(gatewayModelToSlug("hy4-preview")).toBe("tencent/hy4-preview");
+  });
+
   it("显式锚优先于前缀推导（OR 无精确 slug 的两行）", () => {
     expect(gatewayModelToSlug("gpt-5.6-codex")).toBe("openai/gpt-5.6-sol");
     expect(gatewayModelToSlug("qwen3.8-max")).toBe("qwen/qwen3.8-max-0902");
   });
+
   it("无厂商前缀返回 null（不参与同步）", () => {
-    // ⚠ seed 里的 hy3 / hy4-preview 首段分别是 'hy3'/'hy4' —— 不在 VENDOR_PREFIX 表
-    //   ⇒ 真实形态就是 no-slug skip（快照里腾讯系没有裸 hy 前缀行）。这不是缺陷,是现状;
-    //   若将来给它们配 slug,走 SLUG_OVERRIDES 显式锚,别改前缀推导语义。
-    expect(gatewayModelToSlug("hy4-preview")).toBeNull();
-    expect(gatewayModelToSlug("3.5-turbo")).toBeNull(); // 数字开头,自然 miss
+    expect(gatewayModelToSlug("3.5-turbo")).toBeNull(); // 数字开头
     expect(gatewayModelToSlug("llama-3")).toBeNull(); // 前缀不在表
-    expect(gatewayModelToSlug("hy-turbo")).toBe("tencent/hy-turbo"); // 假想的 hy- 前缀行:表在,推导生效
+    expect(gatewayModelToSlug("some-third-party-model")).toBeNull();
   });
 });
 
@@ -169,6 +176,19 @@ describe("白名单 ↔ seed.sql 一致性（防漂移）", () => {
       .map((m) => m[1])
       .filter((name): name is string => name !== undefined);
     expect(new Set(all).size).toBe(all.length);
+  });
+
+  it("seed.sql 每个模型都能推出厂商前缀（覆盖回归，不依赖外部目录）", () => {
+    // 判别力来源：首版实现用 split("-")[0] 查厂商表，qwen3.8-flash / hy3 / hy4-preview
+    // 等行被误判 no-slug（2026-10-19 stg 实证 4 行）。这条立刻红。
+    // ⚠ 刻意**不**读 OR 快照：快照在 gitignored 的 .trellis/ 下，CI 上不存在，
+    //   导入它会让构建失败。这里只锁「推导得出 slug」这个纯函数性质。
+    const models = [...seedSql.matchAll(/^\s*\('([^']+)',/gm)]
+      .map((m) => m[1])
+      .filter((name): name is string => name !== undefined);
+    expect(models).toHaveLength(45);
+    const unresolved = models.filter((model) => gatewayModelToSlug(model) === null);
+    expect(unresolved).toEqual([]);
   });
 });
 
@@ -305,6 +325,35 @@ describe("POST /api/models/sync-openrouter（按钮路径）", () => {
     expect(second.body?.inserted).toBe(0);
     // 重放的 synced 与第一次一致（同一批 matched 行再刷一遍）
     expect(second.body?.synced).toBe(first.body?.synced);
+  });
+
+  it("17 行白名单全缺时全量补插（D1 参数上限回归：单条 INSERT 必须分批）", async () => {
+    // 空目录基线上把所有白名单行清掉 → 下一次同步要一次插 17 行。
+    // ⚠ 这是 D1 绑定参数上限（100）的回归用例:12 列 × 17 行 = 204 参数,
+    //   不分批会 500（stg 实走 2026-10-19 已实证）。删行用 raw SQL 一次清干净。
+    const names = OPENROUTER_INSERT_ALLOWLIST.map((r) => r.model);
+    await env.DB.prepare(
+      `DELETE FROM models WHERE model IN (${names.map(() => "?").join(",")})`,
+    )
+      .bind(...names)
+      .run();
+
+    // 目录里 17 行白名单全在（价随便给,只要能插）
+    stubOrCatalog(
+      OPENROUTER_INSERT_ALLOWLIST.map((r) => orModel(r.slug, "0.000002", "0.00001", "0.0000002")),
+    );
+    const res = await syncAs(adminCookie);
+    expect(res.status).toBe(200);
+    expect(res.body?.inserted).toBe(OPENROUTER_INSERT_ALLOWLIST.length);
+
+    // 逐行验证:行真的在库里,且 cap 取自 allowlist
+    for (const row of OPENROUTER_INSERT_ALLOWLIST) {
+      const stored = await dbRow(row.model);
+      expect(stored.maxOutputTokens).toBe(row.maxOutputTokens);
+    }
+    // 重放即幂等
+    const replay = await syncAs(adminCookie);
+    expect(replay.body?.inserted).toBe(0);
   });
 
   it("cap/freeMode/hiddenFromMembers 不被同步改写（存量值保持）", async () => {
