@@ -23,6 +23,11 @@
   --ring: 199 89% 60%;
   --success: 142 71% 45%;
   --radius: 0.5rem;
+  /* 公开页（/ 与 /docs）品牌蓝：取自 doc/icon.png 的量化采样（design.md §4）。
+     纯增量 token —— 不覆写 --primary，控制台观感零变化。 */
+  --brand: 203 88% 49%; /* #0F99ED */
+  --brand-hover: 195 84% 59%; /* #3DC1EE */
+  --brand-foreground: 213 60% 12%; /* 与 --primary-foreground 同值 */
 }
 
 @theme inline {
@@ -44,6 +49,9 @@
   --color-destructive-foreground: hsl(var(--destructive-foreground));
   --color-ring: hsl(var(--ring));
   --color-success: hsl(var(--success));
+  --color-brand: hsl(var(--brand));
+  --color-brand-hover: hsl(var(--brand-hover));
+  --color-brand-foreground: hsl(var(--brand-foreground));
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -64,6 +72,16 @@
 /* Radix-style popover/scroll-lock 防布局偏移 + 稳定滚动条槽位（spec authentication.md 已知问题） */
 html {
   scrollbar-gutter: stable;
+}
+
+/* 公开页专用装饰：顶部居中的品牌蓝径向光晕（纯装饰，无动画；design.md §4）。
+   调用方负责 pointer-events-none + aria-hidden，且它不承载任何布局职责。 */
+.marketing-glow {
+  background-image: radial-gradient(
+    48rem 28rem at 50% -8rem,
+    hsl(var(--brand) / 0.16),
+    transparent 70%
+  );
 }
 
 /* 尊重 prefers-reduced-motion（spec quality.md） */
