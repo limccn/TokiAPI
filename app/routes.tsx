@@ -4,9 +4,10 @@
 // 例外：`/models` 任何已登录用户可读（批次 P，D18）—— 它**不在** RequireAdmin 里，
 // 页内再按角色收敛可写控件；后端只对写动词设 adminOnly。
 import { lazy, Suspense, type ComponentType } from "react";
-import { createBrowserRouter, Navigate } from "react-router";
+import { createBrowserRouter } from "react-router";
 import { AppLayout } from "@/components/layout/app-layout";
 import { RequireAdmin } from "@/components/layout/require-admin";
+import { MarketingLayout } from "@/components/marketing/marketing-layout";
 import { PageLoading } from "@/components/ui/states";
 
 function lazyPage(loader: () => Promise<{ default: ComponentType }>) {
@@ -19,6 +20,16 @@ function lazyPage(loader: () => Promise<{ default: ComponentType }>) {
 }
 
 export const router = createBrowserRouter([
+  // 公开营销面（/ 与 /docs）：不经认证守卫，未登录直接可见。
+  // index 精确匹配 `/`，不会吞掉 /login、/register 等同级静态路径（design.md §2 风险 1）。
+  {
+    element: <MarketingLayout />,
+    children: [
+      { index: true, element: lazyPage(() => import("@/routes/home")) },
+      { path: "docs", element: lazyPage(() => import("@/routes/docs")) },
+    ],
+  },
+
   // 认证页（public；已登录时内部重定向到 /dashboard）
   { path: "/login", element: lazyPage(() => import("@/routes/login")) },
   { path: "/register", element: lazyPage(() => import("@/routes/register")) },
@@ -27,7 +38,6 @@ export const router = createBrowserRouter([
   {
     element: <AppLayout />,
     children: [
-      { index: true, element: <Navigate to="/dashboard" replace /> },
       { path: "dashboard", element: lazyPage(() => import("@/routes/dashboard")) },
       { path: "keys", element: lazyPage(() => import("@/routes/keys")) },
       { path: "billing", element: lazyPage(() => import("@/routes/billing")) },
