@@ -19,8 +19,8 @@
 //      成为可探测信号，见 better-auth email-verification.mjs:100-108）。
 import type { Logger } from "./logger";
 
-/** 发件人（lmlh.net 域已配 Resend 的 DKIM/SPF，见 PRD R0.2）。 */
-export const EMAIL_FROM = "notify@lmlh.net";
+/** 发件人（tokiapi.app 域已配 Resend 的 DKIM/SPF，见 PRD R0.2；2026-11-03 域名迁移）。 */
+export const EMAIL_FROM = "notify@tokiapi.app";
 export const EMAIL_FROM_NAME = "AI Gateway";
 /** 出站超时上界（毫秒）：信号同时约束响应体读取，防上游挂起拖死认证请求。 */
 export const EMAIL_TIMEOUT_MS = 10_000;
