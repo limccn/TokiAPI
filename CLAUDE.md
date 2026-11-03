@@ -19,7 +19,7 @@ OpenAI 兼容的 **AI API 网关**：单入口代理多家模型供应商（Open
 | Validation | Zod（`zod` v4 + `@hono/zod-validator`） |
 | Frontend | React 19、React Router v7、Vite、Tailwind CSS v4、shadcn-style UI、React Query |
 | Quality | TypeScript strict、ESLint（flat config）、Vitest + Miniflare、drizzle-kit migrations |
-- 线上实例：生产 `https://platform.lmlh.net`（公开 API `https://api.lmlh.net`）由维护者 fork（`wrangler.prod.jsonc`，gitignored）部署；**staging 环境已退役**（退役 runbook 见本地 `governance/stg-retirement.md`）。
+- 线上实例：生产 `https://tokiapi.app`（公开 API `https://api.tokiapi.app`）由维护者 fork（`wrangler.prod.jsonc`，gitignored）部署；旧域 `platform.lmlh.net` / `api.lmlh.net` 保留绑定为**跳转别名**（域分流自动 301/308，2026-11-03 域名迁移）。**staging 环境已退役**（退役 runbook 见本地 `governance/stg-retirement.md`）。
 
 ## 部署配置（jsonc 双形态）
 
