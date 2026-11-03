@@ -18,6 +18,7 @@ import { listModelsRoute } from "./procedures/list";
 import { createModelRoute } from "./procedures/create";
 import { updateModelRoute } from "./procedures/update";
 import { deleteModelRoute } from "./procedures/delete";
+import { syncOpenrouterRoute } from "./procedures/sync-openrouter";
 
 const app = new Hono<AppEnv>();
 
@@ -26,5 +27,6 @@ app.use("*", adminOnly()); // ↓ 以下全部仅 admin（顺序敏感：必须�
 createModelRoute(app); // POST /
 updateModelRoute(app); // PATCH /:id
 deleteModelRoute(app); // DELETE /:id
+syncOpenrouterRoute(app); // POST /sync-openrouter —— OpenRouter 价格同步（仅 admin；无 body）
 
 export default app;

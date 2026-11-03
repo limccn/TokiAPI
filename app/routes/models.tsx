@@ -9,13 +9,14 @@
 //   ③ 后端写路由：POST/PATCH/DELETE 由 router.ts 的 adminOnly 拦（顺序敏感，见该文件头）。
 //      故本页即便被改坏，member 也改不动价格表 —— 但按钮不该出现，那是 UX 不是安全。
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { Check, Copy, Eye, EyeOff, Gift, Info, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { Check, Copy, Eye, EyeOff, Gift, Info, Pencil, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
 import { z } from "zod";
 import { useSession } from "@/hooks/use-session";
 import { useModels } from "@/modules/models/hooks/use-models";
 import { useCreateModel } from "@/modules/models/hooks/use-create-model";
 import { useUpdateModel } from "@/modules/models/hooks/use-update-model";
 import { useDeleteModel } from "@/modules/models/hooks/use-delete-model";
+import { useSyncOpenrouter } from "@/modules/models/hooks/use-sync-openrouter";
 import {
   MODEL_CAP_OPTIONS,
   isUnofferedCap,
@@ -420,6 +421,9 @@ export default function ModelsPage() {
   // 行控制专用的 PATCH 实例 —— 与弹窗里那个**不是同一个**（mutate 的 isPending/error 各自独立，
   // 否则点一下 Free 会让弹窗按钮也转成 "Saving…"）。
   const updateModel = useUpdateModel();
+  // 同步按钮专用的 mutation 实例（10-16-openrouter-price-sync）：isPending/error 自持，
+  // 不与上面的行控制/弹窗实例共享。
+  const syncOpenrouter = useSyncOpenrouter();
 
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<ModelResponse | null>(null);
@@ -545,12 +549,27 @@ export default function ModelsPage() {
         // 再写一遍只是噪声）。用户 2026-09-23 裁定删除。
         description="Price table used for usage billing"
         actions={
-          // Add price 仅 admin：member 发 POST 会被后端 403，按钮本就不该出现
+          // Add price / Sync prices 仅 admin：member 发 POST 会被后端 403，按钮本就不该出现
           isAdmin ? (
-            <Button onClick={() => setFormOpen(true)}>
-              <Plus aria-hidden="true" />
-              Add price
-            </Button>
+            <>
+              {/* 同步（10-16-openrouter-price-sync）：服务端拉 OR 目录 → 刷价 + 白名单补插。
+                  失败顶在表格上方（与行控制同款 alert 条），成功回显 synced/inserted 明细。 */}
+              <Button
+                variant="outline"
+                disabled={syncOpenrouter.isPending}
+                onClick={() => syncOpenrouter.mutate()}
+              >
+                <RefreshCw
+                  className={syncOpenrouter.isPending ? "animate-spin" : undefined}
+                  aria-hidden="true"
+                />
+                {syncOpenrouter.isPending ? "Syncing…" : "Sync prices"}
+              </Button>
+              <Button onClick={() => setFormOpen(true)}>
+                <Plus aria-hidden="true" />
+                Add price
+              </Button>
+            </>
           ) : undefined
         }
       />
@@ -588,6 +607,32 @@ export default function ModelsPage() {
                 className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
               >
                 {updateModel.error.message}
+              </p>
+            </div>
+          ) : null}
+          {/* 同步结果条（同款告警条体例）：失败显 error；成功显 synced/inserted/skipped 明细。
+              不自动消失 —— 同步是显式动作，结果该留到用户离开/下次操作。 */}
+          {isAdmin && syncOpenrouter.isError ? (
+            <div className="p-6 pb-0">
+              <p
+                role="alert"
+                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              >
+                {syncOpenrouter.error.message}
+              </p>
+            </div>
+          ) : isAdmin && syncOpenrouter.data ? (
+            <div className="p-6 pb-0">
+              <p
+                role="status"
+                className="rounded-md border border-muted bg-muted/40 px-3 py-2 text-sm text-muted-foreground"
+              >
+                Synced {syncOpenrouter.data.synced} prices,{" "}
+                {syncOpenrouter.data.inserted} new models from OpenRouter
+                {syncOpenrouter.data.skipped.length > 0
+                  ? ` (${syncOpenrouter.data.skipped.length} skipped)`
+                  : ""}
+                .
               </p>
             </div>
           ) : null}

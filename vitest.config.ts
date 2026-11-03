@@ -21,6 +21,8 @@ export default defineConfig({
   test: {
     // miniflare 内不可达上游约 2s 才报错（Network connection lost），多次请求的用例需更宽超时
     testTimeout: 30_000,
+    // 只收本项目 tests/ —— 防外部工作区（如 .trellis/tmp-catalog-work 下另一仓库的套件）被误收
+    include: ["tests/**/*.test.ts"],
   },
   plugins: [
     cloudflareTest({
