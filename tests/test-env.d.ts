@@ -55,6 +55,13 @@ declare namespace Cloudflare {
     /** 事务邮件收件人白名单（同上）。pin "" = 全放行，与 prod 缺省形态一致。 */
     EMAIL_ALLOWED_RECIPIENTS?: string;
     /**
+     * GitHub 绑定赠金金额（11-08-reward-semantics-overhaul）。vitest.config.ts pin "5"；
+     * tests/settings.test.ts 用 helpers.withSwitch 翻成 "0" 断言端点读的是 env ——
+     * 未被 pin 的键无法保证可写，故此处必须声明（漏声明的症状是「运行时能跑、typecheck 报错」）。
+     * 另外两个赠金金额键不在此列：测试只以字面 env 对象直调包装，不经 cloudflare:test 的 env 读。
+     */
+    GITHUB_BIND_BONUS_AMOUNT?: string;
+    /**
      * 短信认证（11-06-sms-alicloud-auth）。vitest.config.ts 全部 pin 成**部署缺省**（开关 "false"、
      * 其余空串）—— 开关态由 helpers.withSwitch 在运行时翻转。漏声明会「运行时能跑、typecheck 报错」
      * （本文件是 Cloudflare.Env 的平行声明，src/env.d.ts 管不到 cloudflare:test 的 env）。

@@ -7,7 +7,7 @@ import { users } from "../../../db/schema";
 import { createDb } from "../../../db";
 import { listUsersQuerySchema } from "../types";
 import { toUserResponse } from "../lib/convert";
-import { emailCredentialUserIds } from "../lib/email-credential";
+import { emailCredentialUserIds, githubAccountUserIds } from "../lib/email-credential";
 
 export function listUsersRoute(app: Hono<AppEnv>): void {
   app.get("/", zValidator("query", listUsersQuerySchema), async (c) => {
@@ -45,10 +45,11 @@ export function listUsersRoute(app: Hono<AppEnv>): void {
 
     // 邮件注册判据（09-21-email-admin-promotion-switch）：**一次**批量查询回答整页，
     // 不在 map 里按行走 N 次单查。查询范围 = 本页实际返回的 id（不是全表）。
-    const emailRegisteredIds = await emailCredentialUserIds(
-      db,
-      rows.map((row) => row.id),
-    );
+    const pageUserIds = rows.map((row) => row.id);
+    const emailRegisteredIds = await emailCredentialUserIds(db, pageUserIds);
+    // GitHub 绑定判据（11-08 R10）：与邮件判据同批、同范围（列表的 githubLinked 字段
+    // 与解绑按钮可用性都读它）。
+    const githubLinkedIds = await githubAccountUserIds(db, pageUserIds);
 
     logger.info("users_listed", {
       total,
@@ -57,7 +58,9 @@ export function listUsersRoute(app: Hono<AppEnv>): void {
     });
     return c.json({
       success: true as const,
-      items: rows.map((row) => toUserResponse(row, emailRegisteredIds.has(row.id))),
+      items: rows.map((row) =>
+        toUserResponse(row, emailRegisteredIds.has(row.id), githubLinkedIds.has(row.id)),
+      ),
       total,
       limit: query.limit,
       offset: query.offset,

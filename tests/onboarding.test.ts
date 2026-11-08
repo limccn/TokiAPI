@@ -3,13 +3,14 @@
 // 覆盖：AC9（未登录 401 + 响应形状）、AC1（有赠金流水 → pending + 金额）、AC10（金额取流水实际值
 // 而非 env）、AC5（赠金关闭 → 无流水 → 不弹）、AC6（本功能上线前的存量用户 → 不弹）、AC7（已标记
 // → 不弹）、AC2/AC3/AC4 的**服务端等价断言**（标记后换浏览器/设备同结论 —— 标记在服务端不在
-// localStorage）、幂等与用户隔离，以及「真实注册（C1 赠金钩子）→ 端点即 pending」的端到端连通。
+// localStorage）、幂等与用户隔离，以及「真实邮箱注册后端点立即给出确定结论」的端到端连通
+// （11-08-reward-semantics-overhaul 起建号不再赠金：注册后 = pending=false、无流水）。
 //
 // 刻意不覆盖（不是遗漏）：弹窗的出现/关闭/跳转动效与三条关闭路径的交互、Esc/遮罩关闭、
 // 「标记请求失败仍能关闭」（R6/AC8）—— 这些是纯前端行为，仓库 app/ 下无测试基建（既有惯例），
 // 由 Playwright / stg 人工验证覆盖。前端侧可自动化的部分（金额格式化）已有 format 单测。
 import { env } from "cloudflare:test";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createDb } from "../src/db";
 import { balanceTx, inviteCodes, users } from "../src/db/schema";
@@ -159,9 +160,11 @@ describe("GET /api/me/onboarding（首登欢迎状态）", () => {
     expect(body?.welcome).toEqual({ pending: false, bonusAmount: null });
   });
 
-  it("端到端连通：真实注册（C1 赠金钩子）后立即 pending=true、金额=5", async () => {
-    // 走 Better Auth 真实注册端点（邀请码准入 + user.create.after 发赠金），
-    // 证明「注册响应返回时流水已存在」—— 前端跳 /dashboard 后查询一定拿得到 pending=true，无竞态。
+  it("端到端连通：真实邮箱注册后立即 pending=false、金额 null，且无 signup_bonus 流水（11-08 新语义）", async () => {
+    // 走 Better Auth 真实注册端点（邀请码准入）。11-08-reward-semantics-overhaul 起，
+    // 赠金触发点从「建号」移到「手机验证」—— 邮箱注册后立即查询的结果是确定的 pending=false，
+    // 无竞态问题（响应返回即可判定）。
+    // 正向路径（手机注册 → 验证响应返回时流水已存在）由 tests/sms-auth.test.ts 的 AC7 覆盖。
     const email = "ob-signup@test.dev";
     const inviteCode = await insertInvite();
     const res = await selfFetch("http://localhost/api/auth/sign-up/email", {
@@ -187,8 +190,15 @@ describe("GET /api/me/onboarding（首登欢迎状态）", () => {
 
     const { status, body } = await getOnboarding(await cookieFor(row.id));
     expect(status).toBe(200);
-    expect(body?.welcome).toEqual({ pending: true, bonusAmount: 5 });
+    expect(body?.welcome).toEqual({ pending: false, bonusAmount: null });
     expect(await welcomeSeenAt(row.id)).toBeNull();
+
+    // 「不发」是因为**没有流水**，不是「有流水但读空」—— 直接对库取证
+    const txRows = await db
+      .select()
+      .from(balanceTx)
+      .where(and(eq(balanceTx.userId, row.id), eq(balanceTx.type, "signup_bonus")));
+    expect(txRows).toHaveLength(0);
   });
 
   it("用户隔离：他人已标记不影响自己（判定按会话 userId，不按全局状态）", async () => {

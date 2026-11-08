@@ -446,7 +446,7 @@ export default function RegisterPage() {
     try {
       // changeEmail 的并更语义见 design §13.5：占位邮箱（emailVerified=false）命中
       // canUpdateWithoutVerification ⇒ 新地址立即写入，随后发验证信；点击链接后
-      // emailVerified=true 并发放既有邮箱验证赠金。
+      // emailVerified=true 并发放邮箱绑定赠金（11-08 语义）。
       const { error } = await authClient.changeEmail({
         newEmail: parsed.data,
         callbackURL: `${window.location.origin}/dashboard`,

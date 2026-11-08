@@ -6,6 +6,8 @@ import type { AppEnv } from "../../types";
 import { adminOnly } from "../../middleware/auth";
 import { listUsersRoute } from "./procedures/list";
 import { updateUserRoute } from "./procedures/update";
+import { unbindGithubRoute } from "./procedures/unbind-github";
+import { unbindEmailRoute } from "./procedures/unbind-email";
 import { deleteUserRoute } from "./procedures/delete";
 import { createInviteRoute } from "./procedures/create-invite";
 import { listInvitesRoute } from "./procedures/list-invites";
@@ -19,6 +21,9 @@ listUsersRoute(app); // GET /
 createInviteRoute(app); // POST /invites
 listInvitesRoute(app); // GET /invites
 updateUserRoute(app); // PATCH /:id
+// 解绑身份（11-08 R10）：段数不同不会与 DELETE /:id 误匹配，注册在其前只为可读
+unbindGithubRoute(app); // DELETE /:id/github
+unbindEmailRoute(app); // DELETE /:id/email
 deleteUserRoute(app); // DELETE /:id
 adjustBalanceRoute(app); // POST /:id/balance
 

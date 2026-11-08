@@ -15,15 +15,21 @@
 //   校验 + 消费链路（该 dev-only 路由已于 2026-10-14 一键发布适配中随整个 seed 脚手架移除）。
 //   于是生产鉴权路径中不再存在任何"靠变量没被设置"来兜底的判定，隔离是**结构性**的而非约定性的。
 //
-// 赠金与邮箱验证（09-16-signup-bonus-grant）：
-// - 注册赠金挂在 `databaseHooks.user.create.after` —— 该钩子**不区分 provider**，
-//   email/password 与 GitHub OAuth 两条注册路径都触发（PRD R9/D4）；
-//   挂 before 不行：建号失败会在库里留下孤儿赠金。
+// 赠金与邮箱验证（09-16-signup-bonus-grant；11-08-reward-semantics-overhaul 改语义）：
+// - 三档赠金挂**绑定动作**，不挂建号（语义矩阵见 src/lib/bonus.ts 文件头）：
+//     · signup_bonus ← phoneNumber 插件的 `callbackOnVerification`（手机号注册 / 已登录绑定手机）；
+//     · email_verify_bonus ← `emailVerification.afterEmailVerification`（邮箱绑定并验证）；
+//     · github_bind_bonus ← `databaseHooks.account.create.after` 且 providerId === "github"
+//       （是否算「注册后绑定」由 grantGithubBindBonus 的库内证据判定，钩子不做启发式）。
+//   `databaseHooks.user.create.after` **不再发钱** —— 邮箱注册与 GitHub 注册建号时零发放；
+//   挂 before 也从来不行：建号失败会在库里留下孤儿赠金。
 // - 邮箱验证**开关语义**：EMAIL_VERIFICATION_ENABLED 关闭（缺省）时整个 emailVerification
 //   段不配置 —— 而非「配置了但内部 no-op」。后果（刻意设计）：
 //     1) sendOnSignUp 一并消失 → 注册不签发验证 token、不发信；
 //     2) afterEmailVerification 未接线 → 即使有人拿旧 token 打通 GET /api/auth/verify-email
-//        （Better Auth 内置端点恒在）也不会发验证赠金 —— 开关关闭期间赠金结构性不可达。
+//        （Better Auth 内置端点恒在）也不会发邮箱绑定赠金 —— 开关关闭期间该档结构性不可达。
+// - 存量账号冻结：迁移把上线前的用户全部置 users.bonus_eligible=false，三档一律不发；
+//   判据在 src/lib/bonus.ts 的包装层（钩子本身不分支）。
 // - 真发送（08-27-email-notification，2026-09-22）：sendVerificationEmail 回调接 Resend
 //   （src/lib/email.ts）。**失败不在回调里 catch**：注册路径由库侧 runInBackgroundOrAwait
 //   吞错（fail-open），交互式端点须上抛（fail-loud）—— 自己 catch 会让后者谎报「已发送」。
@@ -45,13 +51,19 @@ import { and, eq, ne } from "drizzle-orm";
 import type { Db } from "../db";
 import * as schema from "../db/schema";
 import { isAdminEmail, parseAdminEmails } from "./admin-emails";
-import { grantEmailVerifyBonus, grantSignupBonus, isEmailVerificationEnabled } from "./bonus";
+import {
+  grantEmailVerifyBonus,
+  grantGithubBindBonus,
+  grantSignupBonus,
+  isEmailVerificationEnabled,
+} from "./bonus";
 import { sendMail, verificationEmail } from "./email";
 import { consumeInviteCode, validateInviteCode } from "./invites";
 import { logger } from "./logger";
 import { MIN_PASSWORD_LENGTH } from "./password";
 import {
   SMS_CODE_TTL_SECONDS,
+  buildPhonePlaceholderEmail,
   isCanonicalPhone,
   isSmsAuthEnabled,
   toNationalNumber,
@@ -230,6 +242,14 @@ export function createAuth(env: Env, db: Db) {
             allowedAttempts: 3,
             // 只认规范形：非 +86 号码在插件层就被 400 掉，不会进入验证码存储
             phoneNumberValidator: (value) => isCanonicalPhone(value),
+            // 注册赠金（11-08 语义 = **手机验证赠金**）：手机号注册成功与「已登录用户绑定手机」
+            // 两条路径都会走到这里（routes.mjs 的 register / updatePhoneNumber 两个分支）。
+            // 找回密码（reset）不触发本回调（库内该路径直调 verifyPhoneNumberOTP）—— 语义正确：
+            // 重置密码既不是注册也不是绑定。资格判定（存量账号冻结）在 grantSignupBonus 内部，
+            // 这里不做分支；fail-open 同样由它保证（赠金异常不让验证失败）。
+            callbackOnVerification: async ({ user }) => {
+              await grantSignupBonus(env, db, logger, Number(user.id));
+            },
             // 🔴 **不配 `verifyOTP`**：配了它，校验就整体交给外部（阿里云侧的数字码），
             // 而 reset-password 链路读不到阿里云的答案（research R4）。本仓采 B 模式：
             // 自己生成/存储/校验，阿里云只负责投递。
@@ -245,13 +265,10 @@ export function createAuth(env: Env, db: Db) {
             },
             signUpOnVerification: {
               // users.email 是 UNIQUE NOT NULL，手机号注册必须造一个占位邮箱。
-              // 格式（PRD R18 / AC37 / design §13.2）：`u<5 位随机十六进制>.+86<11 位号码>@phone.invalid`。
-              // 🔴 **随机段不可省**：若地址完全由号码推导，任何人先拿到邀请码注册该地址，就能让
-              // 号码真实主人永远注册失败（撞 UNIQUE → 500 且不可自愈）。5 位十六进制（≈100 万）
-              // 只用于「同一号码的地址不可预知」；跨账号唯一性由号码本身（UNIQUE）保证。
-              // 识别统一走 src/lib/phone.ts 的 isPlaceholderEmail（后缀判据，新旧格式同时命中）。
-              getTempEmail: (phone) =>
-                `u${crypto.randomUUID().replaceAll("-", "").slice(0, 5)}.+86${toNationalNumber(phone)}@phone.invalid`,
+              // 格式与随机段的必要性见 src/lib/phone.ts 的 buildPhonePlaceholderEmail
+              // （单一真源：admin 解绑邮箱时的重置地址用同一函数，11-08 R10 / design §14.3）。
+              // 识别统一走同文件的 isPlaceholderEmail（后缀判据，新旧格式同时命中）。
+              getTempEmail: (phone) => buildPhonePlaceholderEmail(phone),
               // 名称只取后四位：前端展示用，不构成身份（完整号码不落在 name 里）
               getTempName: (phone) => `User ${toNationalNumber(phone).slice(-4)}`,
             },
@@ -285,10 +302,10 @@ export function createAuth(env: Env, db: Db) {
             }
             return undefined;
           },
-          // 注册赠金（R1/R9）：挂在 after —— 此时用户已落库、已有自增 id，且两条注册路径
-          // （email/password 与 GitHub OAuth）都经过本钩子。fail-open 由 grantSignupBonus 保证。
+          // 建号**不发赠金**（11-08-reward-semantics-overhaul）：注册赠金改挂手机验证
+          //（phoneNumber.callbackOnVerification），邮箱/GitHub 注册建号时零发放。
+          // 这里只保留管理员名单自动提权。
           after: async (user) => {
-            await grantSignupBonus(env, db, logger, Number(user.id));
             // 管理员名单自动提权（PRD R17 / AC32，design §13.1 触发点①）：建号即判定 ——
             // 覆盖「全新部署没有 admin，第一个命中名单的账号免手工 UPDATE」的 bootstrap 场景。
             // 与注册渠道无关（GitHub / 邮箱 / 手机一视同仁），也**不受**
@@ -299,6 +316,25 @@ export function createAuth(env: Env, db: Db) {
             if (Number.isInteger(userId) && userId > 0 && email !== "") {
               await promoteAdminIfListed(env, db, { id: userId, email });
             }
+          },
+        },
+      },
+      account: {
+        create: {
+          // GitHub 绑定赠金（11-08-reward-semantics-overhaul）：account.create.after 对应
+          // 「新建一个 OAuth/凭据账户行」。GitHub OAuth 首登时该钩子同样触发 —— 是否算
+          // 「注册后绑定」由 grantGithubBindBonus 的**库内证据判定**（phone_number 非空 /
+          // 存在 credential 账户行）决定，钩子本身不做启发式。
+          // 非 github 的 provider（email/password 建 credential 行等）在包装里直接返回：
+          // 一次函数调用 + 一次字符串比较，零查询开销。
+          after: async (account) => {
+            await grantGithubBindBonus(
+              env,
+              db,
+              logger,
+              Number(account.userId),
+              account.providerId,
+            );
           },
         },
       },
@@ -366,6 +402,13 @@ export type AuthInstance = ReturnType<typeof createAuth>;
  *
  * 不检查 EMAIL_ACCOUNT_ADMIN_PROMOTION_ENABLED：那个开关只约束人工提升动作
  *（PATCH /api/users/:id 的写边界），本函数由部署方维护的名单直接授权。
+ *
+ * 🔴 已知边界（11-08 code check MEDIUM，未在本轮修改）：本判据只比邮箱字符串，不要求
+ * emailVerified。`changeEmail` 在 `updateEmailWithoutVerification: true` 下会把**未验证**的
+ * 新地址立即写库，再触发一次登录即可被自动提权。手机门禁后门（src/middleware/auth.ts）
+ * 已要求 emailVerified；本处未收紧是因为 `EMAIL_VERIFICATION_ENABLED=false` 的部署上邮箱
+ * 密码账号可以长期 emailVerified=false，收紧会让合法管理员无法自动提权（11-06 行为变更）。
+ * 待所有者决定：要么开启邮箱验证，要么在此处加 emailVerified 并接受该部署形态的回归。
  */
 async function promoteAdminIfListed(
   env: Env,

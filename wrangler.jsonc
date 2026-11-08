@@ -96,7 +96,7 @@
     "crons": ["0 2 * * *"]
   },
 
-  // --- 非敏感运行时配置（21 键，安全缺省）---
+  // --- 非敏感运行时配置（22 键，安全缺省）---
   // 治理规则：四个真实 secret（名单见 .dev.vars.example 与 README 部署章节）**绝不进本文件**，
   // 只走 `.dev.vars`（一键部署 setup 页输入项通道）或
   // `wrangler secret put`。个性化值（BETTER_AUTH_URL / GITHUB_CLIENT_ID / ADMIN_EMAILS）
@@ -125,11 +125,16 @@
     // （src/generated/modelcaps.ts 存档位；缺省 8192 × 2 = 16384 基准；改动后需重跑 render:modelcaps + 部署）
     "MODELCAP_BASE_TOKENS": "8192",
     "MODELCAP_MULTIPLIER": "2",
-    // 注册赠金 / 邮箱验证赠金金额（USD，09-16-signup-bonus-grant）：缺省 5（开箱即送）；
-    // 显式设 0（或非法值）即不赠（涉及钱，非法配置 fail-safe 到少发）
+    // 三档赠金金额（USD，11-08-reward-semantics-overhaul 起语义与绑定动作一一对应）：
+    //   SIGNUP_BONUS_AMOUNT       = 手机验证赠金（手机号注册 / 绑定手机）
+    //   EMAIL_VERIFY_BONUS_AMOUNT = 邮箱绑定赠金（绑定并验证邮箱）
+    //   GITHUB_BIND_BONUS_AMOUNT  = GitHub 绑定赠金（注册后绑定 GitHub，OAuth 直接注册不发）
+    // 缺省 5（开箱即送）；显式设 0（或非法值）即不赠（涉及钱，非法配置 fail-safe 到少发）。
+    // ⚠ 存量账号在本改造前即被冻结（迁移把 users.bonus_eligible 回填 false），三档一律不发。
     "SIGNUP_BONUS_AMOUNT": "5",
     "EMAIL_VERIFY_BONUS_AMOUNT": "5",
-    // 邮箱验证功能总开关：缺省 false = 系统休眠（不发验证信、不发验证赠金）
+    "GITHUB_BIND_BONUS_AMOUNT": "5",
+    // 邮箱验证功能总开关：缺省 false = 系统休眠（不发验证信、不发邮箱绑定赠金）
     "EMAIL_VERIFICATION_ENABLED": "false",
     // 账户安全总开关（09-21-email-admin-promotion-switch）：缺省/false = 邮件注册的账户不能提升为 admin
     "EMAIL_ACCOUNT_ADMIN_PROMOTION_ENABLED": "false",

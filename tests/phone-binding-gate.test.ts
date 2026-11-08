@@ -22,6 +22,7 @@ import {
   sessionCookie,
   setupKey,
   setupUser,
+  withAdminEmails,
   withSwitch,
 } from "./helpers";
 
@@ -43,6 +44,18 @@ async function markPhoneVerified(userId: number, phoneNumber: string): Promise<v
   await db
     .update(users)
     .set({ phoneNumber, phoneNumberVerified: true })
+    .where(eq(users.id, userId));
+}
+
+/**
+ * 标记邮箱已验证（后门的安全边界，11-08 MEDIUM-1）。
+ * GitHub OAuth 建号时 provider 的 verified 标志会写入该列；邮箱密码注册在
+ * `EMAIL_VERIFICATION_ENABLED=false` 的部署上可能长期为 false —— 那种账号不享受后门。
+ */
+async function markEmailVerified(userId: number): Promise<void> {
+  await createDb(env)
+    .update(users)
+    .set({ emailVerified: true })
     .where(eq(users.id, userId));
 }
 
@@ -182,5 +195,110 @@ describe("phone gate：SMS 开启 + 已验证手机", () => {
       // A′：验证后 → 200
       expect((await getKeys(cookie)).status).toBe(200);
     });
+  });
+});
+
+// ============ ADMIN_EMAILS 后门（11-08 R8 / D7 / AC14–AC15）============
+//
+// 判据 = 会话邮箱命中 ADMIN_EMAILS，与前一轮「登录时自动提权」同一份名单、同一个
+// isAdminEmail 纯函数。注意 withAdminEmails 而非 withSwitch：ADMIN_EMAILS 在 Env 里是
+// 必填 string，只有前者能表达「空名单」且不触发类型问题（helpers 头注有原因）。
+describe("phone gate：ADMIN_EMAILS 后门", () => {
+  it("AC14 A/A′：同一账号只翻名单 → 名单外 403、名单内 200", async () => {
+    const email = "gate-bypass@test.dev";
+    const userId = await setupUser(email, 0);
+    // 后门只对已验证邮箱生效（GitHub 登录的真实形状）；未验证的对照见下一条安全边界用例。
+    await markEmailVerified(userId);
+    const cookie = await cookieFor(userId);
+
+    await withSwitch("SMS_AUTH_ENABLED", "true", async () => {
+      // A：名单不含该邮箱（也不为空，避免与下一条「空名单」用例混淆）→ 拦
+      const blocked = await withAdminEmails("someone-else@test.dev", () =>
+        getKeys(cookie),
+      );
+      expect(blocked.status).toBe(403);
+      expect((blocked.body as ErrorBody).error?.code).toBe("PHONE_BINDING_REQUIRED");
+
+      // A′：同一账号、同一端点，只把该邮箱加入名单 → 放行
+      const allowed = await withAdminEmails(email, () => getKeys(cookie));
+      expect(allowed.status).toBe(200);
+    });
+  });
+
+  it("AC14 空名单 = 无后门（fail-closed）：未验手机仍 403", async () => {
+    const userId = await setupUser("gate-bypass-empty@test.dev", 0);
+    const cookie = await cookieFor(userId);
+
+    await withSwitch("SMS_AUTH_ENABLED", "true", async () => {
+      const res = await withAdminEmails("", () => getKeys(cookie));
+      expect(res.status).toBe(403);
+      expect((res.body as ErrorBody).error?.code).toBe("PHONE_BINDING_REQUIRED");
+    });
+  });
+
+  it("AC14 安全边界：名单命中但邮箱**未验证** → 仍 403；只翻 emailVerified 后放行", async () => {
+    // MEDIUM-1：changeEmail 在 updateEmailWithoutVerification 下会把未验证地址立即写库。
+    // 若后门只比字符串，任何手机号账号都能把邮箱改成名单地址「自证」管理员。
+    const email = "gate-bypass-unverified@test.dev";
+    const userId = await setupUser(email, 0); // setupUser 默认 emailVerified=false
+    const cookie = await cookieFor(userId);
+
+    await withSwitch("SMS_AUTH_ENABLED", "true", async () => {
+      const blocked = await withAdminEmails(email, () => getKeys(cookie));
+      expect(blocked.status).toBe(403);
+      expect((blocked.body as ErrorBody).error?.code).toBe("PHONE_BINDING_REQUIRED");
+
+      // 对照：同一行只把 emailVerified 翻成 true → 200（证明拦截原因就是邮箱未验证）
+      await markEmailVerified(userId);
+      const allowed = await withAdminEmails(email, () => getKeys(cookie));
+      expect(allowed.status).toBe(200);
+    });
+  });
+
+  it("AC15 phoneGateBypassed 四态：未命中 / 命中未验证 / 命中已验证 / SMS 关闭", async () => {
+    const email = "gate-profile-bypass@test.dev";
+    const userId = await setupUser(email, 0);
+    const cookie = await cookieFor(userId);
+
+    const readBypassed = async (): Promise<boolean> => {
+      const res = await selfFetch("http://localhost/api/me/profile", {
+        headers: { Cookie: cookie },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        profile?: { phoneGateBypassed?: boolean };
+      };
+      return body.profile?.phoneGateBypassed === true;
+    };
+
+    // 未命中：SMS 开启但名单里没有这个邮箱
+    await withAdminEmails("someone-else@test.dev", async () => {
+      await withSwitch("SMS_AUTH_ENABLED", "true", async () => {
+        expect(await readBypassed()).toBe(false);
+      });
+    });
+
+    await withAdminEmails(email, async () => {
+      // 名单命中但邮箱未验证 → false（与中间件同一边界：未验证地址不能自证管理员）
+      await withSwitch("SMS_AUTH_ENABLED", "true", async () => {
+        expect(await readBypassed()).toBe(false);
+      });
+
+      await markEmailVerified(userId);
+
+      // 命中：SMS 开启 + 名单包含 + 邮箱已验证
+      await withSwitch("SMS_AUTH_ENABLED", "true", async () => {
+        expect(await readBypassed()).toBe(true);
+      });
+      // SMS 关闭：门禁整体不存在 ⇒ 即使名单命中，字段也必须是 false
+      // （「无门禁」不等于「被跳过」；若这里为 true，前端会误以为存在后门语义）
+      await withSwitch("SMS_AUTH_ENABLED", "false", async () => {
+        expect(await readBypassed()).toBe(false);
+      });
+    });
+
+    // 还原守卫：两个 helper 的 finally 都失效时，后面的文件会读到脏 env
+    expect(env.ADMIN_EMAILS).toBe("");
+    expect(env.SMS_AUTH_ENABLED).toBe("false");
   });
 });

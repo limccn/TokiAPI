@@ -39,10 +39,12 @@ BETTER_AUTH_URL=http://localhost:5173
 # modelcap 档位乘算常数（09-16 kv-ops 档位化；缺省 8192 × 2 = 16384 基准；改后重跑 render:modelcaps）
 # MODELCAP_BASE_TOKENS=8192
 # MODELCAP_MULTIPLIER=2
-# 注册赠金 / 邮箱验证赠金金额（USD，09-16-signup-bonus-grant；缺省 5 开箱即送；显式 0 = 不赠）
+# 三档赠金金额（USD；缺省 5 开箱即送；显式 0 = 不赠）。11-08 起语义 = 绑定动作：
+# 手机验证（注册赠金）/ 邮箱绑定（邮箱赠金）/ 注册后绑定 GitHub（GitHub 绑定赠金）
 # SIGNUP_BONUS_AMOUNT=5
 # EMAIL_VERIFY_BONUS_AMOUNT=5
-# 邮箱验证功能总开关（09-16-signup-bonus-grant；缺省 false = 休眠：不发验证信、不发验证赠金）
+# GITHUB_BIND_BONUS_AMOUNT=5
+# 邮箱验证功能总开关（09-16-signup-bonus-grant；缺省 false = 休眠：不发验证信、不发邮箱绑定赠金）
 # EMAIL_VERIFICATION_ENABLED=false
 # 账户安全总开关（09-21-email-admin-promotion-switch；缺省 false = 邮件注册账户不能提升为 admin）
 # EMAIL_ACCOUNT_ADMIN_PROMOTION_ENABLED=false

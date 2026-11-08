@@ -46,19 +46,25 @@ function toSettingRows(settings: RuntimeSettings): SettingRow[] {
       key: "signup_bonus_amount",
       value: formatUsd(settings.signupBonusAmount),
       description:
-        "Bonus credited automatically once a new account is created (0 disables the grant).",
+        "Bonus credited once a new account verifies a phone number (0 disables the grant).",
     },
     {
       key: "email_verify_bonus_amount",
       value: formatUsd(settings.emailVerifyBonusAmount),
       description:
-        "Bonus credited once a user verifies their email address (0 disables the grant).",
+        "Bonus credited once a user binds and verifies an email address (0 disables the grant).",
+    },
+    {
+      key: "github_bind_bonus_amount",
+      value: formatUsd(settings.githubBindBonusAmount),
+      description:
+        "Bonus credited once a user links a GitHub account after registration (0 disables the grant).",
     },
     {
       key: "email_verification_enabled",
       value: settings.emailVerificationEnabled ? "enabled" : "disabled",
       description:
-        "When disabled, verification emails are not sent and the email verification bonus is unreachable.",
+        "When disabled, verification emails are not sent and the email binding bonus is unreachable.",
     },
     {
       key: "email_account_admin_promotion_enabled",

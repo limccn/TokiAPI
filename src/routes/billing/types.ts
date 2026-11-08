@@ -5,14 +5,17 @@
 import { z } from "zod";
 
 // 取值真源（筛选参数校验 + 输出校验共用）：新增 type 必须同步此 enum，
-// 否则前端筛选该 type 会被 zValidator 拒绝（400）。赠金两档（09-16-signup-bonus-grant）
-// 对应 users.signup_bonus_granted_at / email_verify_bonus_granted_at 的幂等标记。
+// 否则前端筛选该 type 会被 zValidator 拒绝（400）。赠金三档（09-16-signup-bonus-grant；
+// 11-08-reward-semantics-overhaul 增第三档）对应 users.signup_bonus_granted_at /
+// email_verify_bonus_granted_at / github_bind_bonus_granted_at 的幂等标记：
+// 注册赠金=手机验证、邮箱赠金=邮箱绑定、GitHub 赠金=注册后绑定 GitHub。
 export const balanceTxTypeSchema = z.enum([
   "recharge",
   "usage",
   "adjust",
   "signup_bonus",
   "email_verify_bonus",
+  "github_bind_bonus",
 ]);
 
 export const meTransactionsQuerySchema = z.object({

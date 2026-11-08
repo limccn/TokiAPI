@@ -41,6 +41,7 @@ interface ProfileBody {
     phoneNumberVerified: boolean;
     smsAuthEnabled: boolean;
     githubLinked: boolean;
+    phoneGateBypassed: boolean;
   };
 }
 
@@ -154,7 +155,7 @@ describe("GET /api/me/profile（账号资料，只读）", () => {
     expect(body).toBeNull();
   });
 
-  it("登录后 → 200，八字段形状与类型正确；开关随 env 生效（测试绑定为开启）", async () => {
+  it("登录后 → 200，十字段形状与类型正确；开关随 env 生效（测试绑定为开启）", async () => {
     const userId = await setupUser("pf-basic@test.dev", 0);
     const { status, body } = await getProfile(await cookieFor(userId));
 
@@ -170,6 +171,9 @@ describe("GET /api/me/profile（账号资料，只读）", () => {
       "githubLinked",
       "hasPassword",
       "name",
+      // 11-08-reward-semantics-overhaul R8：门禁后门可见性（SMS 开启 + 命中 ADMIN_EMAILS）
+      // 前端 needsPhoneBinding 据此放行，不靠 SPA 侧私留名单副本
+      "phoneGateBypassed",
       "phoneNumber",
       "phoneNumberVerified",
       "smsAuthEnabled",
@@ -191,6 +195,9 @@ describe("GET /api/me/profile（账号资料，只读）", () => {
       smsAuthEnabled: false,
       // setupUser 不插 accounts 行 ⇒ 没有 GitHub 绑定（正例见下方 'github' 账号用例）
       githubLinked: false,
+      // SMS 关闭 ⇒ 门禁整体不存在，后门字段恒 false（不是「被跳过」）；三态见
+      // tests/phone-binding-gate.test.ts 的 AC15 用例
+      phoneGateBypassed: false,
     });
   });
 

@@ -47,12 +47,15 @@ export default defineConfig({
           // modelcap 档位乘算常数：测试固定缺省基准（8192 × 2 → 档位 1 = 16384）
           MODELCAP_BASE_TOKENS: "8192",
           MODELCAP_MULTIPLIER: "2",
-          // 赠金（09-16-signup-bonus-grant）：金额固定缺省 5（金额分支矩阵在 bonus.unit.test.ts
-          // 与「直接调用 grantSignupBonus（传入自定义 env）」里覆盖 —— miniflare bindings
-          // 在测试进程内固定，无法逐用例改）。邮箱验证显式开启：否则 emailVerification 段
-          // 整段不配置，verify-email 链路（AC5/AC6）不可测。
+          // 赠金（09-16-signup-bonus-grant；11-08-reward-semantics-overhaul 增第三档）：金额固定
+          // 缺省 5（金额分支矩阵在 bonus.unit.test.ts 与「直接调用赠金包装（传入自定义 env）」
+          // 里覆盖 —— miniflare bindings 在测试进程内固定，无法逐用例改）。邮箱验证显式开启：
+          // 否则 emailVerification 段整段不配置，verify-email 链路（AC4/AC6）不可测。
           SIGNUP_BONUS_AMOUNT: "5",
           EMAIL_VERIFY_BONUS_AMOUNT: "5",
+          // GitHub 绑定赠金（11-08）：pin 缺省 5；settings.test.ts 用 withSwitch 翻成 0
+          // 断言「读的是 env」—— 未 pin 的键无法保证可写，故必须在此登记。
+          GITHUB_BIND_BONUS_AMOUNT: "5",
           EMAIL_VERIFICATION_ENABLED: "true",
           // 账户安全总开关（09-21-email-admin-promotion-switch）：显式 pin 成**部署缺省**（关闭）。
           // 被拦分支（403 门控）的路由测试就跑在这一态。bindings 在 miniflare 进程内不可逐用例翻转，

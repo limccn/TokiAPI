@@ -4,6 +4,7 @@
 // 一起断言，避免「函数恒返回 null / 恒抛错」也能全绿。
 import { describe, expect, it } from "vitest";
 import {
+  buildPhonePlaceholderEmail,
   classifyLoginIdentifier,
   isCanonicalPhone,
   isPhoneAllowed,
@@ -219,5 +220,31 @@ describe("classifyLoginIdentifier（登录页单一输入框分流）", () => {
     expect(classifyLoginIdentifier("   ")).toEqual({ kind: "invalid" });
     expect(classifyLoginIdentifier("admin")).toEqual({ kind: "invalid" });
     expect(classifyLoginIdentifier("1380013800")).toEqual({ kind: "invalid" });
+  });
+});
+
+// 11-08 R10 / design §14.3：解绑邮箱后的重置地址与手机号注册共用同一生成函数。
+describe("buildPhonePlaceholderEmail（占位邮箱生成，单一真源）", () => {
+  it("命中 isPlaceholderEmail，且号码后 11 位原样带入", () => {
+    const email = buildPhonePlaceholderEmail("+8613800138000");
+    // 与识别判据成对断言：生成器与识别器漂移会以「未绑定邮箱」显示错乱的形式出现
+    expect(isPlaceholderEmail(email)).toBe(true);
+    expect(email.endsWith("+8613800138000@phone.invalid")).toBe(true);
+    expect(email).toMatch(/^u[0-9a-f]{5}\.\+8613800138000@phone\.invalid$/);
+  });
+
+  it("两次调用随机段不同（防同一号码重复注册撞 users.email UNIQUE）", () => {
+    const first = buildPhonePlaceholderEmail("+8613800138000");
+    const second = buildPhonePlaceholderEmail("+8613800138000");
+    // 随机段 = `u` 后 5 位十六进制；号码段相同，前缀必须不同
+    expect(first.slice(0, 6)).not.toBe(second.slice(0, 6));
+    expect(first).not.toBe(second);
+  });
+
+  it("不同号码生成不同地址（号码段是判据的一部分）", () => {
+    const a = buildPhonePlaceholderEmail("+8613800138000");
+    const b = buildPhonePlaceholderEmail("+8613900139000");
+    expect(a.endsWith("+8613800138000@phone.invalid")).toBe(true);
+    expect(b.endsWith("+8613900139000@phone.invalid")).toBe(true);
   });
 });
