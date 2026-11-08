@@ -53,6 +53,22 @@ export const userResponseSchema = z.object({
    * 否则会出现「画面能点、API 拒绝」或「画面灰着、API 放行」（09-21-email-admin-promotion-switch）。
    */
   emailRegistered: z.boolean(),
+  /**
+   * 规范形手机号（`+861…`）；未绑定 null（11-08 R10 / design §14.1）。
+   * 管理台据此展示绑定状态与解绑按钮的可用性 —— 与 profile 契约的 phoneNumber 同列。
+   */
+  phoneNumber: z.string().nullable(),
+  /**
+   * 号码是否已验证（phone-number 插件写入）。
+   * 解绑护栏只看「有没有号码」，**不要求已验证**（design §14.3 D8：号码本身即登录标识，
+   * 未验证号码仍可走短信验证码登录）。本字段只供列表展示 `unverified` 徽章。
+   */
+  phoneNumberVerified: z.boolean(),
+  /**
+   * 是否已绑定 GitHub（accounts 存在 providerId='github' 行；11-08 R10）。
+   * 与 GET /api/me/profile 的 githubLinked 同口径、同事实来源。
+   */
+  githubLinked: z.boolean(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
