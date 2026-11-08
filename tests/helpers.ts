@@ -108,7 +108,9 @@ export async function withSwitch<T>(
     | "SMS_TEMPLATE_CODE_RESET"
     | "SMS_TEMPLATE_PARAM"
     | "SMS_ACCESS_KEY_ID"
-    | "SMS_ACCESS_KEY_SECRET",
+    | "SMS_ACCESS_KEY_SECRET"
+    // 11-08-reward-semantics-overhaul：GitHub 绑定赠金金额（settings.test.ts 翻成 0 验 env 生效）。
+    | "GITHUB_BIND_BONUS_AMOUNT",
   value: string | undefined,
   fn: () => Promise<T>,
 ): Promise<T> {

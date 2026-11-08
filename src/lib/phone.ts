@@ -73,6 +73,24 @@ export function toNationalNumber(canonical: string): string {
 }
 
 /**
+ * 手机号账号的占位邮箱（users.email NOT NULL UNIQUE，11-08 R10 / design §14.3）。
+ *
+ * 格式与手机号注册同一形态：`u<5hex>.+86<11位>@phone.invalid`。随机段**不可省**：
+ * 同一号码反复注册/解绑时，固定格式会撞 UNIQUE，而这里没有任何可换的落点。
+ *
+ * 单一真源：`src/lib/auth.ts` 的 `signUpOnVerification.getTempEmail` 与
+ * `DELETE /api/users/:id/email`（解绑邮箱后的重置地址）都调用本函数 —— 两处各拼一次
+ * 格式必然漂，而漂移的后果是 `isPlaceholderEmail` 判据或前端「未绑定邮箱」显示失效。
+ *
+ * 前置条件：`canonicalPhone` 已通过 `isCanonicalPhone`（调用方保证；本函数不重复校验，
+ * 非法输入会原样落到号码段 —— 那也只影响这一条占位地址的形态）。
+ */
+export function buildPhonePlaceholderEmail(canonicalPhone: string): string {
+  const randomHex = crypto.randomUUID().replaceAll("-", "").slice(0, 5);
+  return `u${randomHex}.+86${toNationalNumber(canonicalPhone)}@phone.invalid`;
+}
+
+/**
  * 是否为本系统生成的**占位邮箱**（手机号注册账号；PRD R18 / AC37）。
  *
  * 判据是**后缀**而不是完整格式（design §13.2）：新旧两种形态都必须命中 ——
@@ -190,8 +208,12 @@ export function renderTemplateParam(template: string, code: string): string {
 }
 
 /**
- * 登录页判别器（纯函数，**客户端也在用**）：用户只填一个「用户名」输入框，
- * 由这里决定往哪个端点送（design §7.2 / PRD D16）。
+ * 登录标识判别器（纯函数，**保留的协议契约**，11-08 R9 起登录页不再调用它）。
+ *
+ * 历史与现状：登录页最初只有**一个**「Email or phone number」输入框，由这里决定往哪个
+ * 端点送（design §7.2 / PRD D16）。11-08 R9 改为 Email / Phone 分段控件后，登录页各自
+ * 走明确的端点，不再需要猜；本函数保留为「按输入形态归类」的单一契约（单测锁定，
+ * 其他调用方可继续用），删除它只会让同类判别在别处被重新复制一份。
  *
  *   - 含 `@` ⇒ 当邮箱（不在这里做格式校验：交给 Better Auth，免得两处校验漂移）；
  *   - 否则能归一成 `+86` 手机号 ⇒ 当手机号；

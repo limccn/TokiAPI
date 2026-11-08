@@ -3,13 +3,14 @@
 // WINDOW_SECONDS（rate-limit.ts）、parseRetentionDays（cleanup.ts，env 覆盖）、
 // parseBonusAmount / isEmailVerificationEnabled（bonus.ts，env 覆盖）、
 // isEmailAccountAdminPromotionEnabled（lib/admin-promotion-policy.ts，env 覆盖）。
-// 赠金三项展示解析后的生效值（不是原始 env 字符串），与 requestLogRetentionDays 同口径。
+// 赠金四项展示解析后的生效值（不是原始 env 字符串），与 requestLogRetentionDays 同口径。
 import type { Hono } from "hono";
 import type { AppEnv } from "../../../types";
 import { DEFAULT_CACHE_TTL_SECONDS } from "../../../db/schema";
 import { WINDOW_SECONDS } from "../../v1/rate-limit";
 import {
   DEFAULT_EMAIL_VERIFY_BONUS,
+  DEFAULT_GITHUB_BIND_BONUS,
   DEFAULT_SIGNUP_BONUS,
   isEmailVerificationEnabled,
   parseBonusAmount,
@@ -31,6 +32,10 @@ export function adminSettingsRoute(app: Hono<AppEnv>): void {
       c.env.EMAIL_VERIFY_BONUS_AMOUNT,
       DEFAULT_EMAIL_VERIFY_BONUS,
     );
+    const githubBindBonusAmount = parseBonusAmount(
+      c.env.GITHUB_BIND_BONUS_AMOUNT,
+      DEFAULT_GITHUB_BIND_BONUS,
+    );
     const emailVerificationEnabled = isEmailVerificationEnabled(
       c.env.EMAIL_VERIFICATION_ENABLED,
     );
@@ -45,6 +50,7 @@ export function adminSettingsRoute(app: Hono<AppEnv>): void {
       requestLogRetentionDays,
       signupBonusAmount,
       emailVerifyBonusAmount,
+      githubBindBonusAmount,
       emailVerificationEnabled,
       emailAccountAdminPromotionEnabled,
     });
@@ -57,6 +63,7 @@ export function adminSettingsRoute(app: Hono<AppEnv>): void {
         requestLogRetentionDays,
         signupBonusAmount,
         emailVerifyBonusAmount,
+        githubBindBonusAmount,
         emailVerificationEnabled,
         emailAccountAdminPromotionEnabled,
       },

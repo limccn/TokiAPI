@@ -50,10 +50,14 @@ interface Env {
   // 部署；该脚本读 .dev.vars 同名键（档位表是全局的，不分环境）。
   MODELCAP_BASE_TOKENS?: string;
   MODELCAP_MULTIPLIER?: string;
-  // 注册赠金 / 邮箱验证赠金金额（USD，09-16-signup-bonus-grant；部署配置 [vars]）：
-  // 缺省 5（开箱即送）；显式设 0（或非法值）即不赠（fail-safe 到少发）。
+  // 三档赠金金额（USD；部署配置 [vars]）：
+  // - SIGNUP_BONUS_AMOUNT：11-08 起语义 = **手机验证赠金**（注册赠金，phone-number 插件触发）
+  // - EMAIL_VERIFY_BONUS_AMOUNT：语义 = **邮箱绑定赠金**（afterEmailVerification 触发）
+  // - GITHUB_BIND_BONUS_AMOUNT：**GitHub 绑定赠金**（注册后绑定 GitHub 触发，11-08 新增）
+  // 三者缺省 5（开箱即送）；显式设 0（或非法值）即不赠（涉及钱，fail-safe 到少发）。
   SIGNUP_BONUS_AMOUNT?: string;
   EMAIL_VERIFY_BONUS_AMOUNT?: string;
+  GITHUB_BIND_BONUS_AMOUNT?: string;
   // 邮箱验证功能总开关（09-16-signup-bonus-grant；部署配置 [vars]）：缺省 false = 整个
   // emailVerification 段不配置（不发验证信、不发验证赠金）；true/1/yes/on 才开启。
   EMAIL_VERIFICATION_ENABLED?: string;

@@ -25,6 +25,7 @@ import {
   applyMigrations,
   countTxByType,
   createSession,
+  getBalance,
   selfFetch,
   sessionCookie,
   setupUser,
@@ -597,7 +598,7 @@ describe("AC7/AC8/AC9/AC24 手机号注册", () => {
       // 邀请码被消费（一次性）
       expect(await inviteUsedAt(invite)).not.toBeNull();
 
-      // 赠金：注册即赠（默认 5），流水类型 signup_bonus
+      // 赠金：手机验证即赠（默认 5；11-08 起 signup_bonus = 手机验证档），流水类型 signup_bonus
       expect(await countTxByType(userId, "signup_bonus")).toBe(1);
       const bonus = await db.query.balanceTx.findFirst({
         where: and(eq(balanceTx.userId, userId), eq(balanceTx.type, "signup_bonus")),
@@ -976,6 +977,29 @@ describe("AC17 绑定手机号", () => {
       };
       expect(me.profile?.phoneNumber).toBe(targetPhone);
       expect(me.profile?.phoneNumberVerified).toBe(true);
+
+      // ③′ 11-08 语义：**手机验证 = 注册赠金触发点**（callbackOnVerification 的绑定分支）。
+      // setupUser 建的账号具备赠金资格（新行 DEFAULT true），绑定成功即到账一次。
+      expect(await countTxByType(mine, "signup_bonus")).toBe(1);
+      expect(await getBalance(mine)).toBe(5);
+
+      // ③″ 重复验证同号码不重复发放：库内号码清空后重绑同一号码 ——
+      // callbackOnVerification 二次触发，幂等标记挡住第二次发放。
+      // 对照：若发放无幂等，余额会变成 10（下方两条断言同时钉住）。
+      const db = createDb(env);
+      await db
+        .update(users)
+        .set({ phoneNumber: null, phoneNumberVerified: false })
+        .where(eq(users.id, mine));
+      const repeatCode = await issueCode(targetPhone);
+      const repeat = await verifyOtp(
+        { phoneNumber: targetPhone, code: repeatCode, updatePhoneNumber: true },
+        { Cookie: cookie },
+      );
+      expect(repeat.status).toBe(200);
+      await repeat.text();
+      expect(await getBalance(mine)).toBe(5);
+      expect(await countTxByType(mine, "signup_bonus")).toBe(1);
 
       // ④ 同一号码不能再绑给第二个账号（跨账号唯一性）
       const secondUser = await setupUser(`sms-bind-second-${phoneSeq}@test.dev`, 0);
