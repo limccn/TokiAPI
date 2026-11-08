@@ -26,6 +26,7 @@
 - 自带限流与响应缓存：超额自动拒绝，重复请求更快更省
 - 网页管理台：看用量报表，管密钥、成员与模型价格
 - 数据与密钥留在自己的 Cloudflare 账号里（自托管）
+- 账号体系：**手机号为主入口**（短信验证码 / 手机号 + 密码），邮箱为补充渠道（可注册后绑定，也支持邮箱 + 密码登录），GitHub OAuth 开放注册登录；未完成手机验证的账号会被引导绑定手机（手机号限中国内地 `+86`）
 
 ## 快速开始
 
@@ -88,14 +89,20 @@ npm run deploy -- --dry-run  # 预览模式：只 build 并打印选中的配置
    npx wrangler secret put GITHUB_CLIENT_SECRET   # 启用 GitHub 登录才需要
    npx wrangler secret put RESEND_API_KEY         # 启用邮箱验证/事务邮件才需要
    ```
-4. **GitHub OAuth App**（首个管理员的唯一入口）：GitHub → Settings → Developer settings → OAuth Apps → New；回调地址精确等于 `https://<你的 origin>/api/auth/callback/github`。Client ID 替换配置里的 `replace-me-github-client-id`（一键部署改 Dashboard vars），Client Secret 用第 3 步写入；并把你的邮箱加进 `GITHUB_ALLOWED_EMAILS`（逗号分隔；**空 = 拒绝所有 GitHub 登录**）。
-5. **首个管理员**：用白名单内 GitHub 账号登录后，把该账号提升为 admin（**唯一合法 bootstrap；禁止 SQL INSERT 造用户**——Better Auth 的哈希/绑定会被绕过）：
+4. **GitHub OAuth App**（首个管理员的唯一入口）：GitHub → Settings → Developer settings → OAuth Apps → New；回调地址精确等于 `https://<你的 origin>/api/auth/callback/github`。Client ID 替换配置里的 `replace-me-github-client-id`（一键部署改 Dashboard vars），Client Secret 用第 3 步写入；并把你的邮箱加进 `ADMIN_EMAILS`（逗号分隔；名单内邮箱的账号在注册/登录时**自动成为管理员**，**空 = 无人自动提权**，仍可用第 5 步手工提升）。
+5. **首个管理员**：用 GitHub 账号登录；邮箱命中 `ADMIN_EMAILS` 时已自动成为 admin，未命中则手工提升（**唯一合法 bootstrap；禁止 SQL INSERT 造用户**——Better Auth 的哈希/绑定会被绕过）：
    ```bash
    npx wrangler d1 execute DB --remote \
      --command "UPDATE users SET role='admin' WHERE email='you@example.com';"
    ```
-6. **生成邀请码**：管理员登录管理台 → 邀请页生成邀请链接，成员打开链接用邮箱密码注册。
+6. **生成邀请码**：管理员登录管理台 → 邀请页生成邀请链接，成员打开链接注册。开启短信认证后注册为**三屏**：邀请码 + 手机号验证码 → 用户名与密码 →（可选）绑定邮箱；关闭短信时仍是邮箱密码注册（GitHub 注册无需邀请码）。
 7. **配置上游与价格**：管理台 → 供应商（填各家 API Key，AES-GCM 加密存储、响应中打码）；模型价格表在管理台逐条配置，或 `npx wrangler d1 execute DB --remote --file=./seed.sql` 灌默认价目（**全量替换**语义，已配过价格时慎用）。
+8. **（可选）启用短信认证**：用阿里云「短信认证」（`dypnsapi`，个人开发者可用其赠送模板，免企业报备）。控制台开通后取得**签名名**与**模板 CODE**，填进 `SMS_SIGN_NAME` / `SMS_TEMPLATE_CODE`；`SMS_ACCESS_KEY_ID` / `SMS_ACCESS_KEY_SECRET` 用 `wrangler secret put` 写入（RAM 子账号只需 `dypns:SendSmsVerifyCode`）；最后把 `SMS_AUTH_ENABLED` 置 `true`（缺省 `false` = 相关端点整体 404）。
+   - **核对模板变量名**：控制台模板正文若不是 `${code}` / `${min}`，改 `SMS_TEMPLATE_PARAM` 的键名即可，无需改代码（缺省 `{"code":"##code##","min":"5"}`）。
+   - **五个系统赠送模板任选**：`100001` 登录/注册/通用 · `100002` 修改绑定号码 · `100003` 重置密码 · `100004` 绑定新号码 · `100005` 验证已绑定号码。五者只差文案（变量同为 `${code}` / `${min}`、频控一致）；`SMS_TEMPLATE_CODE` 供登录/注册/绑定使用，`SMS_TEMPLATE_CODE_RESET` 供找回密码使用（留空则复用前者）。
+   - `SMS_ALLOWED_PHONES` 为空 = **任何号码都能收到验证码**；建议先填测试号码白名单，验证通过后再放开（写成全非法值等于全拒，不会静默放开）。
+   - 限制：模板为中文、仅中国内地号码、同一号码 60 秒内只能发一条；手机号与邮箱可互相绑定（账号以手机号验证为准入门槛）。
+   - ⚠️ **打开开关即启用手机号硬门禁**：未验证手机的账号登录后只能访问绑定页，其余管理面 API 一律 `403 PHONE_BINDING_REQUIRED`（`/v1`、`/anthropic` 代理不受影响）。先用测试号码确认短信能收到，再对全站打开；出问题时把 `SMS_AUTH_ENABLED` 改回 `false` 即整体回滚（门禁随开关结构性消失）。
 
 ## 配置在哪
 
@@ -110,16 +117,20 @@ npm run deploy -- --dry-run  # 预览模式：只 build 并打印选中的配置
 - `BETTER_AUTH_SECRET`、`GATEWAY_SECRET_KEY`——均必需（后者用于加密上游供应商密钥；各自随机生成，两者不得相同）
 - `GITHUB_CLIENT_SECRET`——仅启用 GitHub 登录时需要
 - `RESEND_API_KEY`——仅启用邮箱验证/事务邮件时需要
+- `SMS_ACCESS_KEY_ID` / `SMS_ACCESS_KEY_SECRET`——仅启用短信认证时需要（阿里云 RAM 子账号，最小权限 `dypns:SendSmsVerifyCode`）
 
 **`[vars]` 运行时值**（`wrangler.jsonc` 已带安全缺省；个性化值按收尾清单覆盖）：
 
 | 键 | 缺省 | 说明 |
 | --- | --- | --- |
 | `BETTER_AUTH_URL` | `http://localhost:5173` | 平台域完整地址——**生产必须改为实际 origin**（缺省会使管理面 301 到 localhost） |
-| `GITHUB_CLIENT_ID` / `GITHUB_ALLOWED_EMAILS` | 占位 / 空 | GitHub 登录（可选）；白名单空 = 拒绝所有登录（fail-closed） |
+| `GITHUB_CLIENT_ID` / `ADMIN_EMAILS` | 占位 / 空 | GitHub 登录（可选）；名单内邮箱的账号注册/登录后自动为 admin（只升不降），空 = 无人自动提权（登录不受名单限制） |
 | `API_DOMAIN` | 空 | 双域名分流开关（空 = 关闭——单一 workers.dev 域的正确形态） |
 | `API_KEY_PREFIX` / `REQUEST_LOG_RETENTION_DAYS` | `sk-` / `30` | 网关密钥前缀 / 请求日志保留天数 |
 | `CACHE_ENABLED`、`EMAIL_VERIFICATION_ENABLED` 等策略开关 | 全部关闭 | 缺省即关闭（fail-closed），按需开启 |
+| `SMS_AUTH_ENABLED` / `SMS_ALLOWED_PHONES` | `false` / 空 | 短信认证开关（关 = 端点 404、UI 消失）/ 号码白名单（**空 = 全放行**，全非法 = 全拒） |
+| `SMS_SIGN_NAME` / `SMS_TEMPLATE_CODE` / `SMS_TEMPLATE_PARAM` | 空 / 空 / `{"code":"##code##","min":"5"}` | 阿里云短信签名名、模板 CODE（五个赠送模板任选，登录/注册/绑定用）、模板变量映射（`##code##` 会被替换为真实验证码） |
+| `SMS_TEMPLATE_CODE_RESET` | 空 | 找回密码专用模板 CODE（空 = 复用 `SMS_TEMPLATE_CODE`；建议 `100003`） |
 
 各键的权威注释见 `wrangler.jsonc` 与 `.dev.vars.example`；运行时配置三分类的完整规则见 [CLAUDE.md](CLAUDE.md) §环境与配置。
 
@@ -180,7 +191,7 @@ npm run dev            # http://localhost:5173
 
 本地 dev 读取 `wrangler.jsonc`（绑定与 `[vars]` 安全缺省）+ `.dev.vars`（本地覆盖）。GitHub OAuth 是可选项，不配置也能跑；数据库命令用 binding 名引用（`DB`），配置文件显式 pin 到 `wrangler.jsonc`。
 
-**第一个账号怎么来**：邮箱密码注册需要邀请码，而第一个管理员还没有发码入口——本地与线上同一条路径：GitHub OAuth。在 `.dev.vars` 配好 `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` / `GITHUB_ALLOWED_EMAILS`（你自己的邮箱），登录后把自己提升为管理员：
+**第一个账号怎么来**：邮箱密码注册需要邀请码，而第一个管理员还没有发码入口——本地与线上同一条路径：GitHub OAuth。在 `.dev.vars` 配好 `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` / `ADMIN_EMAILS`（你自己的邮箱），登录后自动成为管理员；若未命中名单，可手工执行：
 
 ```bash
 npx wrangler d1 execute DB --local --config wrangler.jsonc \

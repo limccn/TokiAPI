@@ -26,6 +26,7 @@ For individuals and teams who want to manage multiple model vendors in one place
 - Built-in rate limiting and response caching: over-quota requests are rejected automatically, repeated requests are faster and cheaper
 - Web admin console: view usage reports; manage keys, members and model prices
 - Data and keys stay in your own Cloudflare account (self-hosted)
+- Account model: **phone-first** (SMS code, or phone + password), email as a secondary channel (link it after sign-up, or sign in with email + password), and open GitHub OAuth sign-up/sign-in; accounts without a verified phone are guided to bind one (mainland-China `+86` numbers only)
 
 ## Quick start
 
@@ -88,14 +89,20 @@ Right after deployment the system is in a safe state: zero users, every policy s
    npx wrangler secret put GITHUB_CLIENT_SECRET   # only when GitHub sign-in is enabled
    npx wrangler secret put RESEND_API_KEY         # only when email verification / transactional mail is enabled
    ```
-4. **GitHub OAuth App** (the only entry point for the first admin): GitHub → Settings → Developer settings → OAuth Apps → New; the callback URL must exactly equal `https://<your origin>/api/auth/callback/github`. Replace the `replace-me-github-client-id` placeholder with the Client ID (one-click deploys: Dashboard vars), write the Client Secret as in step 3, and add your email to `GITHUB_ALLOWED_EMAILS` (comma-separated; **empty = all GitHub logins rejected**).
-5. **First admin**: sign in with a whitelisted GitHub account, then promote it to admin (**the only legitimate bootstrap; never INSERT a user with SQL** — Better Auth's hashing/bindings would be bypassed):
+4. **GitHub OAuth App** (the only entry point for the first admin): GitHub → Settings → Developer settings → OAuth Apps → New; the callback URL must exactly equal `https://<your origin>/api/auth/callback/github`. Replace the `replace-me-github-client-id` placeholder with the Client ID (one-click deploys: Dashboard vars), write the Client Secret as in step 3, and add your email to `ADMIN_EMAILS` (comma-separated; accounts whose email is listed are **automatically promoted to admin** on sign-up/sign-in, and **empty = no automatic promotion** — use step 5 to promote manually).
+5. **First admin**: sign in with a GitHub account; if your email is in `ADMIN_EMAILS` you are already an admin, otherwise promote it manually (**the only legitimate bootstrap; never INSERT a user with SQL** — Better Auth's hashing/bindings would be bypassed):
    ```bash
    npx wrangler d1 execute DB --remote \
      --command "UPDATE users SET role='admin' WHERE email='you@example.com';"
    ```
-6. **Generate invite codes**: sign in to the admin console → invites page → create invite links; members open a link and register with email and password.
+6. **Generate invite codes**: sign in to the admin console → invites page → create invite links; members open a link to register. With SMS enabled, registration is a **three-screen** flow: invite code + phone OTP → username and password → (optional) bind an email; with SMS off it stays the email + password form (GitHub sign-up needs no invite code).
 7. **Configure vendors and pricing**: admin console → providers (enter each vendor's API key; stored AES-GCM-encrypted, masked in responses); configure the model price table row by row in the console, or load the default price list with `npx wrangler d1 execute DB --remote --file=./seed.sql` (**full-replace** semantics — use with care if you already configured prices).
+8. **(Optional) Enable SMS sign-in**: use Alibaba Cloud "SMS verification" (`dypnsapi`; individual developers can use its gifted template and skip enterprise filing). After enabling it in the console, take the **sign name** and **template CODE** and fill in `SMS_SIGN_NAME` / `SMS_TEMPLATE_CODE`; write `SMS_ACCESS_KEY_ID` / `SMS_ACCESS_KEY_SECRET` with `wrangler secret put` (a RAM sub-account needs only `dypns:SendSmsVerifyCode`); finally set `SMS_AUTH_ENABLED` to `true` (the default `false` makes the related endpoints return 404).
+   - **Verify the template variable names**: if the console template body uses names other than `${code}` / `${min}`, just change the keys in `SMS_TEMPLATE_PARAM` — no code change (default `{"code":"##code##","min":"5"}`).
+   - **Pick any of the five gifted templates**: `100001` sign-in/sign-up/generic · `100002` change phone · `100003` reset password · `100004` bind phone · `100005` verify phone. They differ only in wording (same `${code}` / `${min}` variables, same rate limits); `SMS_TEMPLATE_CODE` serves sign-in/sign-up/binding and `SMS_TEMPLATE_CODE_RESET` serves password reset (empty = reuse the former).
+   - An empty `SMS_ALLOWED_PHONES` means **any number can receive a code**; start with a whitelist of test numbers and open it up afterwards (an all-invalid value rejects everyone instead of silently opening up).
+   - Limits: Chinese templates, mainland-China numbers only, one message per number per 60 seconds; phone and email can be bound to the same account (a verified phone is the account's admission gate).
+   - ⚠️ **Turning the switch on also enables the phone gate**: accounts without a verified phone can only reach the binding page after signing in — every other admin-console API returns `403 PHONE_BINDING_REQUIRED` (`/v1` and `/anthropic` proxying is unaffected). Confirm SMS delivery with a test number before opening it up site-wide; if anything goes wrong, set `SMS_AUTH_ENABLED` back to `false` to roll the whole thing back (the gate disappears structurally with the switch).
 
 ## Where configuration lives
 
@@ -110,16 +117,20 @@ Right after deployment the system is in a safe state: zero users, every policy s
 - `BETTER_AUTH_SECRET`, `GATEWAY_SECRET_KEY` — both required (the latter encrypts upstream vendor keys; generate independent random values, they must differ)
 - `GITHUB_CLIENT_SECRET` — only when GitHub sign-in is enabled
 - `RESEND_API_KEY` — only when email verification / transactional mail is enabled
+- `SMS_ACCESS_KEY_ID` / `SMS_ACCESS_KEY_SECRET` — only when SMS sign-in is enabled (Alibaba Cloud RAM sub-account; least privilege `dypns:SendSmsVerifyCode`)
 
 **`[vars]` runtime values** (`wrangler.jsonc` ships safe defaults; personalized values follow the checklist above):
 
 | Key | Default | Description |
 | --- | --- | --- |
 | `BETTER_AUTH_URL` | `http://localhost:5173` | Full platform URL — **must be changed to the real origin in production** (the default 301-redirects the admin console to localhost) |
-| `GITHUB_CLIENT_ID` / `GITHUB_ALLOWED_EMAILS` | placeholder / empty | GitHub sign-in (optional); an empty whitelist = all logins rejected (fail-closed) |
+| `GITHUB_CLIENT_ID` / `ADMIN_EMAILS` | placeholder / empty | GitHub sign-in (optional); accounts whose email is listed become admin automatically on sign-up/sign-in (never demoted), empty = no automatic promotion (sign-in itself is not restricted) |
 | `API_DOMAIN` | empty | Dual-domain split switch (empty = off — the correct form for a single workers.dev domain) |
 | `API_KEY_PREFIX` / `REQUEST_LOG_RETENTION_DAYS` | `sk-` / `30` | Gateway key prefix / request-log retention in days |
 | `CACHE_ENABLED`, `EMAIL_VERIFICATION_ENABLED` and other policy switches | all off | Default = off (fail-closed); enable as needed |
+| `SMS_AUTH_ENABLED` / `SMS_ALLOWED_PHONES` | `false` / empty | SMS sign-in switch (off = endpoints 404, UI hidden) / phone allowlist (**empty = allow all**, all-invalid = reject all) |
+| `SMS_SIGN_NAME` / `SMS_TEMPLATE_CODE` / `SMS_TEMPLATE_PARAM` | empty / empty / `{"code":"##code##","min":"5"}` | Alibaba Cloud sign name, template CODE (any of the five gifted templates; used for sign-in/sign-up/binding), and template variable mapping (`##code##` is replaced with the real code) |
+| `SMS_TEMPLATE_CODE_RESET` | empty | Password-reset-only template CODE (empty = reuse `SMS_TEMPLATE_CODE`; `100003` recommended) |
 
 Authoritative per-key comments live in `wrangler.jsonc` and `.dev.vars.example`; the full three-category runtime config rules are in [CLAUDE.md](CLAUDE.md) §环境与配置.
 
@@ -180,7 +191,7 @@ npm run dev            # http://localhost:5173
 
 Local dev reads `wrangler.jsonc` (bindings and `[vars]` safe defaults) + `.dev.vars` (local overrides). GitHub OAuth is optional — the gateway runs without configuring it. Database commands reference the binding name (`DB`) and pin the config file to `wrangler.jsonc` explicitly.
 
-**Where the first account comes from**: email/password registration requires an invite code, and the first admin has no code-issuing entry point yet — locally and in production it is the same path: GitHub OAuth. Configure `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` / `GITHUB_ALLOWED_EMAILS` (your own email) in `.dev.vars`, sign in, then promote yourself to admin:
+**Where the first account comes from**: email/password registration requires an invite code, and the first admin has no code-issuing entry point yet — locally and in production it is the same path: GitHub OAuth. Configure `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` / `ADMIN_EMAILS` (your own email) in `.dev.vars` and sign in — you become an admin automatically; if the email is not listed, promote yourself manually:
 
 ```bash
 npx wrangler d1 execute DB --local --config wrangler.jsonc \

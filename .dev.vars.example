@@ -17,13 +17,19 @@ GITHUB_CLIENT_SECRET=replace-me-github-client-secret
 # Resend 事务邮件 API key（08-27-email-notification；建议用 send-only 独立 key）。
 # **空或缺失 = 通道未配置**：不发信、不抛错，只记 email_not_configured（fail-safe；回滚杠杆之一）。
 RESEND_API_KEY=
+# 阿里云 AccessKey（11-06-sms-alicloud-auth；短信认证 dypnsapi）。生产用 `wrangler secret put`
+# 下发两个同名 secret，或在一键部署 setup 页输入。**空或缺失 = 通道未配置**：不发短信、不抛错。
+# 建议用只授 `dypns:SendSmsVerifyCode` 的 RAM 子账号；泄露时先在 RAM 禁用/删除再换新。
+SMS_ACCESS_KEY_ID=
+SMS_ACCESS_KEY_SECRET=
 
 # ---- [vars] 本地覆盖（全部可选；缺省值由 wrangler.jsonc 提供，见其注释）----
 # 前端 origin（本地 vite dev 端口）。生产必须等于管理台域 origin —— 在 wrangler.prod.jsonc 设。
 BETTER_AUTH_URL=http://localhost:5173
-# GitHub OAuth App client id + 白名单邮箱（本地测 GitHub 登录时需要；白名单空 = 拒绝所有 GitHub 登录）
+# GitHub OAuth App client id + 管理员邮箱名单（本地测 GitHub 登录时需要；
+# 名单内邮箱的账号在注册/登录时自动成为 admin，空 = 无人自动提权 —— 登录本身不受名单限制）
 # GITHUB_CLIENT_ID=replace-me-github-client-id
-# GITHUB_ALLOWED_EMAILS=
+# ADMIN_EMAILS=
 # 公开 API 域名（双域名分流；空 = 分流关闭 —— 本地 dev 的正常形态，wrangler.jsonc 缺省即为空）
 # API_DOMAIN=
 # 网关 API Key 明文前缀（缺省 sk-；空白视为未设置。仅影响新生成的 Key）
@@ -44,3 +50,16 @@ BETTER_AUTH_URL=http://localhost:5173
 # EMAIL_ALLOWED_RECIPIENTS=
 # request_logs 明细保留天数（cron 清理用；缺省 30）
 # REQUEST_LOG_RETENTION_DAYS=30
+# 短信认证总开关（11-06-sms-alicloud-auth；缺省 false = phone-number 插件不注册：端点 404、UI 消失）
+# SMS_AUTH_ENABLED=false
+# 短信测试号码白名单（逗号分隔，+86 规范形或裸 11 位；**空 = 全放行**；非空但全非法 = 全拒）
+# SMS_ALLOWED_PHONES=
+# 阿里云「短信认证」的签名名 / 模板 CODE —— 控制台领取后抄写（**没有**只读查询端点可自动取）
+# SMS_SIGN_NAME=
+# 赠送模板五选一（只差文案，变量同为 code/min）：100001 登录/注册/通用·
+# 100002 修改绑定号码·100003 重置密码·100004 绑定新号码·100005 验证已绑定号码
+# SMS_TEMPLATE_CODE=100001
+# 找回密码专用模板（可选，空 = 回落上面的键；建议 100003）
+# SMS_TEMPLATE_CODE_RESET=100003
+# 模板变量映射（JSON；变量名以控制台实际模板为准，##code## 会被替换成本次验证码）
+# SMS_TEMPLATE_PARAM={"code":"##code##","min":"5"}

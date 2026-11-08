@@ -9,6 +9,8 @@
 //   6. /api/auth/*（Better Auth，public）与 /api/invites/validate（批次 U 公开预校验，
 //      同挂 authRateLimit）—— 必须先于 requireSession 注册
 //   7. requireSession 挂载 /api/*（未登录 401）
+//      7.5 requireVerifiedPhone 挂载 /api/*（11-06：SMS 开启且未验手机 → 403 PHONE_BINDING_REQUIRED）
+//          —— 必须在模块路由之前；/api/auth/* 与公开端点已在上面注册，天然不受影响
 //   8. 管理面模块路由（/api/users、/api/keys、/api/providers 等）
 //   9. notFound 兜底：/api/* 与 /v1/* 返回 JSON 404；其余路径交给 env.ASSETS 托管
 //      （M6 前端：SPA index.html + 构建产物；wrangler.jsonc assets run_worker_first=true）
@@ -19,8 +21,9 @@ import { ZodError } from "zod";
 import { requestContext } from "./middleware/request-context";
 import { domainSplit } from "./middleware/domain-split";
 import { authRateLimit } from "./middleware/auth-rate-limit";
-import { requireSession } from "./middleware/auth";
+import { requireSession, requireVerifiedPhone } from "./middleware/auth";
 import { apiBaseUrl, platformBaseUrl } from "./lib/domains";
+import { isSmsAuthEnabled } from "./lib/phone";
 import authRouter from "./routes/auth/router";
 import invitesRouter from "./routes/invites/router";
 import usersRouter from "./routes/users/router";
@@ -93,6 +96,11 @@ app.get("/api/config", (c) => {
   return c.json({
     apiBaseUrl: apiBaseUrl(c.env, origin),
     platformBaseUrl: platformBaseUrl(c.env, origin),
+    // 短信认证开关（11-06-sms-alicloud-auth）：前端据此决定是否渲染短信入口。
+    // 必须运行期下发 —— 关闭时 phone-number 插件整段不注册（端点是 404，不是 4xx），
+    // 前端无法靠「试一下」发现，只能由本字段告知。解析点唯一（isSmsAuthEnabled），
+    // 本文件不得写 env.SMS_AUTH_ENABLED === "true"（两处解析必然漂移）。
+    smsAuthEnabled: isSmsAuthEnabled(c.env.SMS_AUTH_ENABLED),
   });
 });
 
@@ -121,6 +129,12 @@ app.route("/anthropic", anthropicRouter);
 
 // 管理面 API：全部要求会话
 app.use("/api/*", requireSession());
+
+// 手机号硬门禁（11-06-sms-alicloud-auth，PRD R19 / design §13.4）：**必须在 requireSession 之后**
+// （依赖它注入的 user/userId），且在管理面模块路由之前。开关关闭时直接放行（部署缺省 = 无门禁）。
+// 上面已注册的 /api/health、/api/config、/api/auth/*、/api/invites/validate 不受影响；
+// /v1/* 与 /anthropic/* 走网关 Key 鉴权，同样不受影响（AC39）。
+app.use("/api/*", requireVerifiedPhone());
 
 // 管理面模块路由
 app.route("/api/users", usersRouter);

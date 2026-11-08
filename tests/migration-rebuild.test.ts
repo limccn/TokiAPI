@@ -14,7 +14,7 @@ import { applyD1Migrations, env } from "cloudflare:test";
 import { asc } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { createDb } from "../src/db";
-import { inviteCodes, users } from "../src/db/schema";
+import { inviteCodes } from "../src/db/schema";
 
 /**
  * 本用例锚定的迁移 = **最后一根重建式迁移**（`__new_*` → INSERT SELECT → DROP → RENAME）。
@@ -64,22 +64,28 @@ describe("重建式迁移（invite_codes.created_by 放开 NOT NULL）", () => {
     // ---------- ① 跑到 0010，造"生产已有数据"的夹具 ----------
     await applyD1Migrations(env.DB, prior);
     const db = createDb(env);
-    const issuerRows = await db
-      .insert(users)
-      .values({ email: "mig-issuer@test.dev", name: "Issuer", role: "admin", balance: 0 })
-      .returning();
-    const issuer = issuerRows[0];
-    if (!issuer) {
-      throw new Error("setup: issuer 未建成");
-    }
+    // 签发者夹具走**裸 SQL**而非 `db.insert(users)`：本用例的 prior 集合锚定在 0010，
+    // 而 Drizzle schema 是**当前**形态 —— 后续任何一根 `users` 的 ADD COLUMN 迁移
+    // （如 0014 的 phone_number / phone_number_verified）都会让 schema 生成的 INSERT
+    // 列出 0010 时还不存在的列，夹具插入先于断言就 SQLITE_ERROR。
+    // 那是夹具与时间线错位，不是被测迁移的缺陷，故这里只写 0010 时确定存在的列。
+    // （created_at / updated_at 是 NOT NULL 且**没有** SQL 默认值 —— drizzle 的 $defaultFn
+    //  在 JS 侧补值，裸 SQL 必须自己给。）
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const issuerResult = await env.DB.prepare(
+      "INSERT INTO users (email, name, role, balance, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+      .bind("mig-issuer@test.dev", "Issuer", "admin", 0, nowSeconds, nowSeconds)
+      .run();
+    const issuerId = issuerResult.meta.last_row_id;
     // 夹具时间戳取整到秒：`mode: "timestamp"` 的列存的是**秒**，毫秒在写入时即被截断
     // （与本迁移无关；不取整会让下面的"原值不变"断言拿毫秒去比秒）。
     const toSeconds = (ms: number): Date => new Date(Math.floor(ms / 1000) * 1000);
     const expiresAt = toSeconds(Date.now() + 24 * 3600 * 1000);
     const consumedAt = toSeconds(Date.now());
     await db.insert(inviteCodes).values([
-      { code: "MIGKEEP001", createdBy: issuer.id, expiresAt, usedAt: consumedAt },
-      { code: "MIGKEEP002", createdBy: issuer.id, expiresAt },
+      { code: "MIGKEEP001", createdBy: issuerId, expiresAt, usedAt: consumedAt },
+      { code: "MIGKEEP002", createdBy: issuerId, expiresAt },
     ]);
 
     // 对照：0010 的 schema 下 created_by 是 NOT NULL，插入 NULL 必须被**数据库**拒绝。
@@ -101,8 +107,8 @@ describe("重建式迁移（invite_codes.created_by 放开 NOT NULL）", () => {
     const byCode = new Map(rows.map((r) => [r.code, r]));
     expect(byCode.has("MIGKEEP001")).toBe(true);
     expect(byCode.has("MIGKEEP002")).toBe(true);
-    expect(byCode.get("MIGKEEP001")?.createdBy).toBe(issuer.id);
-    expect(byCode.get("MIGKEEP002")?.createdBy).toBe(issuer.id);
+    expect(byCode.get("MIGKEEP001")?.createdBy).toBe(issuerId);
+    expect(byCode.get("MIGKEEP002")?.createdBy).toBe(issuerId);
     expect(byCode.get("MIGKEEP001")?.usedAt?.getTime()).toBe(consumedAt.getTime());
     expect(byCode.get("MIGKEEP002")?.usedAt).toBeNull();
     expect(byCode.get("MIGKEEP001")?.expiresAt.getTime()).toBe(expiresAt.getTime());

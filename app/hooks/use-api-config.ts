@@ -12,6 +12,11 @@ export interface ApiConfig {
   apiBaseUrl: string;
   /** 管理台域的 origin。 */
   platformBaseUrl: string;
+  /**
+   * 短信认证是否开启（11-06-sms-alicloud-auth）。关闭时 phone-number 插件整段不注册
+   * （端点 404），所以**不能**靠调用失败来发现 —— 登录页/注册页/找回密码入口一律先读本字段。
+   */
+  smsAuthEnabled: boolean;
 }
 
 /** GET /api/config —— 公开端点（无需会话），故无需 enabled 门控。 */

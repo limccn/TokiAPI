@@ -39,7 +39,9 @@ export default defineConfig({
           API_DOMAIN: "",
           GITHUB_CLIENT_ID: "test-github-client-id",
           GITHUB_CLIENT_SECRET: "test-github-client-secret",
-          GITHUB_ALLOWED_EMAILS: "",
+          // 管理员邮箱名单（11-06-sms-alicloud-auth）：
+          // pin "" = 部署缺省（无人自动提权）；admin-emails.test.ts 用 withAdminEmails 运行时翻转。
+          ADMIN_EMAILS: "",
           // 全局缓存总开关（09-03-stg-cache-investigation）：测试固定开启（cache.test.ts 依赖缓存生效）
           CACHE_ENABLED: "true",
           // modelcap 档位乘算常数：测试固定缺省基准（8192 × 2 → 档位 1 = 16384）
@@ -63,6 +65,19 @@ export default defineConfig({
           // tests/helpers.ts 的 withSwitch 注入 key。白名单 pin ""（= 全放行，与 prod 缺省同形态）。
           RESEND_API_KEY: "",
           EMAIL_ALLOWED_RECIPIENTS: "",
+          // 短信认证（11-06-sms-alicloud-auth）：pin **部署缺省**（开关 "false" = 插件不注册，
+          // 既有用例零影响）。开关态由 tests/helpers.ts 的 withSwitch 在运行时翻转。
+          // 🔴 两个 AK **必须** pin ""：测试进程会加载仓库根 `.dev.vars`（跑批输出
+          // `Using secrets defined in .dev.vars`），开发者本地那份可能含**真实**阿里云 AK ——
+          // 不 pin 的话，任何没 stub 到 fetch 的用例都会打到真实短信通道上（真发短信、真计费）。
+          SMS_AUTH_ENABLED: "false",
+          SMS_ALLOWED_PHONES: "",
+          SMS_SIGN_NAME: "",
+          SMS_TEMPLATE_CODE: "",
+          SMS_TEMPLATE_CODE_RESET: "",
+          SMS_TEMPLATE_PARAM: '{"code":"##code##","min":"5"}',
+          SMS_ACCESS_KEY_ID: "",
+          SMS_ACCESS_KEY_SECRET: "",
           // 延迟计费队列名（09-21-prod-resource-naming）：src/index.ts 的 queue() 按
           // `batch.queue === env.BILLING_QUEUE_NAME` **精确比对**分流（不等即落用量分支）。
           // **必须显式 pin**：不 pin 时该值来自部署配置（wrangler.jsonc）—— 即测试行为会被
