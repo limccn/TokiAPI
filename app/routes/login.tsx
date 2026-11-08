@@ -370,16 +370,21 @@ export default function LoginPage() {
         </p>
       ) : null}
 
-      <form onSubmit={smsView ? handleVerify : handleSubmit} className="space-y-4" noValidate>
+      {/* 第一屏紧凑：表单节奏 16→12px、字段标签与输入的间距 8→6px，
+          只压缩留白，控件仍是 h-9（触控与可读性不变）。 */}
+      <form onSubmit={smsView ? handleVerify : handleSubmit} className="space-y-3" noValidate>
         {/* Email / Phone 分段控件（design §13.2）：aria-pressed 表达当前段；
             smsStatus === "off" 时不渲染 Phone（插件整段 404）。 */}
-        <div role="group" aria-label="Sign-in method" className="flex gap-1 rounded-lg bg-muted p-1">
+        <div role="group" aria-label="Sign-in method" className="flex gap-1 rounded-lg bg-muted p-0.5">
           <button
             type="button"
             aria-pressed={activeMethod === "email"}
             onClick={() => switchMethod("email")}
             className={cn(
-              "flex-1 rounded-md px-3 py-1.5 text-sm transition-colors",
+              // 焦点环与同表单的 Input/Select 同款（flush ring-2，无白色 offset）：
+              // 键盘用户靠它定位当前段。py-1.5 + 轨道 p-0.5 = 36px = h-9，段落控件
+              // 不会比它所控制的输入框更厚。
+              "flex-1 rounded-md px-3 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               activeMethod === "email"
                 ? "bg-background font-medium text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground",
@@ -393,7 +398,10 @@ export default function LoginPage() {
               aria-pressed={activeMethod === "phone"}
               onClick={() => switchMethod("phone")}
               className={cn(
-                "flex-1 rounded-md px-3 py-1.5 text-sm transition-colors",
+                // 焦点环与同表单的 Input/Select 同款（flush ring-2，无白色 offset）：
+              // 键盘用户靠它定位当前段。py-1.5 + 轨道 p-0.5 = 36px = h-9，段落控件
+              // 不会比它所控制的输入框更厚。
+              "flex-1 rounded-md px-3 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 activeMethod === "phone"
                   ? "bg-background font-medium text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",
@@ -405,7 +413,7 @@ export default function LoginPage() {
         </div>
 
         {activeMethod === "email" ? (
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <Label htmlFor="login-email">Email</Label>
             <Input
               id="login-email"
@@ -424,7 +432,7 @@ export default function LoginPage() {
             {errors.email ? <p className="text-xs text-destructive">{errors.email}</p> : null}
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <Label htmlFor="login-phone">Phone number (China Only)</Label>
             <PhoneNumberInput
               id="login-phone"
@@ -448,10 +456,10 @@ export default function LoginPage() {
           <>
             {/* 发码按钮与验证码输入框同一行（输入框占满剩余宽度）；提示行不再出现 ——
                 按钮标签本身（Resend in Ns）已表达发送结果 */}
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <Label htmlFor="login-sms-code">Verification code</Label>
               <div className="flex items-start gap-2">
-                <div className="min-w-0 flex-1 space-y-2">
+                <div className="min-w-0 flex-1 space-y-1.5">
                   <Input
                     id="login-sms-code"
                     inputMode="numeric"
@@ -488,7 +496,7 @@ export default function LoginPage() {
           </>
         ) : (
           <>
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <Label htmlFor="login-password">Password</Label>
               <Input
                 id="login-password"
@@ -530,7 +538,7 @@ export default function LoginPage() {
           </div>
         ) : null}
 
-        <div className="relative py-1 text-center">
+        <div className="text-center">
           <span className="text-xs text-muted-foreground">or</span>
         </div>
         <Button type="button" variant="outline" className="w-full" onClick={handleGithubSignIn}>

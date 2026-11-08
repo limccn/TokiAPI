@@ -8,6 +8,7 @@
 // 旁的号码框把前缀渲染成原生 Select，让「选 Phone」这一段在视觉上可辨认。选项目前只有
 // +86（PRD R20 不提供多国家码），Select 只是占位形态 —— 未来扩国家码从这里改，不另建组件。
 import type { InputHTMLAttributes } from "react";
+import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PHONE_COUNTRY_CODE, toNationalDigits } from "@/lib/phone-input";
 import { Input } from "./input";
@@ -34,18 +35,26 @@ export function PhoneNumberInput({
   return (
     <div className="flex gap-2">
       {withCountrySelector ? (
-        <Select
-          aria-label="Country code"
-          // 受控常量：目前只有 +86，故 onChange 是空实现。写成非受控或省掉 onChange
-          // 会触发 React 的只读字段警告（value 有值但无变更处理）。
-          value={PHONE_COUNTRY_CODE}
-          onChange={() => {
-            // 单一选项，无需处理；扩国家码时在此同步输入清洗规则。
-          }}
-          className="w-[4.5rem] shrink-0"
-        >
-          <option value={PHONE_COUNTRY_CODE}>{PHONE_COUNTRY_CODE}</option>
-        </Select>
+        <div className="relative shrink-0">
+          <Select
+            aria-label="Country code"
+            // 受控常量：目前只有 +86，故 onChange 是空实现。写成非受控或省掉 onChange
+            // 会触发 React 的只读字段警告（value 有值但无变更处理）。
+            value={PHONE_COUNTRY_CODE}
+            onChange={() => {
+              // 单一选项，无需处理；扩国家码时在此同步输入清洗规则。
+            }}
+            className="w-[4.5rem] pr-7"
+          >
+            <option value={PHONE_COUNTRY_CODE}>{PHONE_COUNTRY_CODE}</option>
+          </Select>
+          {/* 原生 select 的箭头被 `appearance-none` 去掉了；不补一个，这个控件读起来
+              就像静态前缀（与左侧无交互的 +86 同形）。箭头纯装饰，点击穿透到 select。 */}
+          <ChevronDown
+            className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+            aria-hidden="true"
+          />
+        </div>
       ) : (
         // 不设 aria-hidden：+86 是区域性约束，读屏用户同样需要知道
         <span className="inline-flex h-9 shrink-0 select-none items-center rounded-md border border-input bg-muted px-3 text-sm text-muted-foreground">
