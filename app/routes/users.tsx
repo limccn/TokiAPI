@@ -31,6 +31,9 @@ import {
   ADMIN_PROMOTION_POLICY_NOTICE,
   shouldBlockAdminPromotion,
 } from "../../src/lib/admin-promotion-policy";
+// 占位邮箱判据与头像菜单 / 资料页共用同一份零依赖函数：解绑邮箱后 users.email 变成
+// `u<5hex>.+86<号码>@phone.invalid`，它是内部地址（还内嵌号码），列表不得原样展示。
+import { isPlaceholderEmail } from "../../src/lib/phone";
 import { formatDateTime, formatUsd } from "@/lib/format";
 import { copyToClipboard } from "@/lib/clipboard";
 import { buildInviteLink } from "@/lib/invite-link";
@@ -472,14 +475,18 @@ export default function UsersPage() {
                       <TableRow key={item.id}>
                         <TableCell>
                           <p className="font-medium">{item.name}</p>
-                          <p className="text-xs text-muted-foreground">{item.email}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {isPlaceholderEmail(item.email) ? "Not set" : item.email}
+                          </p>
                         </TableCell>
                         <TableCell>
                           {/* 规范形 `+8613800138000` → 展示为 `+86 13800138000`（design §14.4）。
                               未验证的号码仍可登录，但加上 unverified 徽章提示风险。 */}
                           {item.phoneNumber ? (
                             <div className="flex flex-wrap items-center gap-1">
-                              <span className="font-mono text-xs">
+                              {/* nowrap：号码里的空格是分组用的，窄屏（表格横向滚动）下
+                                  允许在 +86 后断行会把号码拆成两行，辨认成本陡增。 */}
+                              <span className="whitespace-nowrap font-mono text-xs">
                                 {item.phoneNumber.slice(0, 3)} {item.phoneNumber.slice(3)}
                               </span>
                               {item.phoneNumberVerified ? null : (
@@ -783,12 +790,18 @@ export default function UsersPage() {
           <div className="space-y-4">
             <div className="rounded-md border bg-muted/50 p-3">
               <p className="text-sm font-medium">{unbindTarget.user.name}</p>
-              <p className="text-xs text-muted-foreground">{unbindTarget.user.email}</p>
+              <p className="text-xs text-muted-foreground">
+                {isPlaceholderEmail(unbindTarget.user.email)
+                  ? "Not set"
+                  : unbindTarget.user.email}
+              </p>
             </div>
             <p className="text-sm text-muted-foreground">
               {unbindTarget.kind === "github"
                 ? "The GitHub sign-in will be removed. Password and phone sign-in are unaffected."
-                : "The email sign-in will be removed and the address reset to a placeholder. Password login is disabled until the user binds an email again; bonus history is kept."}
+                // 邮箱/手机密码共用同一行 credential 账户（Better Auth 的 findCredentialAccount），
+                // 删行后两种密码登录都停用；恢复路径是「重新设密码」，不是「重新绑邮箱」。
+                : "The email address is reset to a placeholder and password sign-in (email or phone) stops working until the user sets a new password. Bonus history is kept."}
             </p>
             {unbindIdentity.error && !isUnbindPending ? (
               <p
