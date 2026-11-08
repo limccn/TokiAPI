@@ -74,11 +74,13 @@ if ((deploy.status ?? 1) !== 0) {
 }
 
 console.log("\n[deploy] 完成。部署后核对清单（README「部署后收尾清单」）：");
-console.log("[deploy]   1. secrets 就位：wrangler secret list（四个 secret 键）");
+console.log("[deploy]   1. secrets 就位：wrangler secret list（BETTER_AUTH_SECRET / GATEWAY_SECRET_KEY 必填，");
+console.log("[deploy]      GITHUB_CLIENT_SECRET / RESEND_API_KEY 按需；启用短信另加 SMS_ACCESS_KEY_ID / SMS_ACCESS_KEY_SECRET）");
 console.log("[deploy]   2. 个性化 [vars]：BETTER_AUTH_URL 指向实际管理台 origin（jsonc 缺省是 localhost，");
 console.log("[deploy]      管理面会被 301 到 https://localhost/...）、GITHUB_CLIENT_ID（占位 = GitHub 登录不可用）、");
-console.log("[deploy]      GITHUB_ALLOWED_EMAILS 白名单（占位值同样须核对 —— 值来源详见 README 收尾清单 2/4 步）");
+console.log("[deploy]      ADMIN_EMAILS 管理员邮箱名单（名单内账号注册/登录即自动为 admin；空 = 无人自动提权）");
 console.log("[deploy]   3. 探针：curl -sI https://<管理台>/ 与 https://<api 域>/api/health 均 200");
 console.log("[deploy]   4. 认证面限流：/api/auth 同 IP 25 连发 → 401 为主 + 429 出现");
-console.log("[deploy]   5. 首个 admin：GitHub 登录白名单内账号后 D1 UPDATE users SET role='admin'（禁止 SQL INSERT 造用户）");
+console.log("[deploy]   5. 首个 admin：把邮箱填进 ADMIN_EMAILS 后该账号注册/登录即自动提权（名单须在首次登录前配好）；");
+console.log("[deploy]      兜底为 D1 UPDATE users SET role='admin' WHERE email='...'（禁止 SQL INSERT 造用户）");
 process.exit(0);

@@ -27,7 +27,7 @@ OpenAI 兼容的 **AI API 网关**：单入口代理多家模型供应商（Open
 
 | 形态 | 文件 | 内容 | 谁在用 |
 | --- | --- | --- | --- |
-| 提交入库 | `wrangler.jsonc` | 占位资源 id（一键部署自动供给并回写真实 id）+ `[vars]` 15 键安全缺省 + **无 routes / 无 env / 无 placement** | 本地 dev / test / CI、一键部署（Workers Builds）、手动部署的缺省 |
+| 提交入库 | `wrangler.jsonc` | 占位资源 id（一键部署自动供给并回写真实 id）+ `[vars]` 21 键安全缺省 + **无 routes / 无 env / 无 placement** | 本地 dev / test / CI、一键部署（Workers Builds）、手动部署的缺省 |
 | 维护者 fork | `wrangler.prod.jsonc`（gitignored） | 真实域名 routes（管理台域 + API 域，`custom_domain`）+ 真实 D1/KV id + 个性化 vars + placement | 仅 `npm run deploy` 自动选中 |
 
 - 选择逻辑在 `scripts/deploy.mjs`：fork 存在 → 用 fork；否则用 jsonc。**防呆语义**：维护者肌肉记忆 `npm run deploy` 误用占位 id 覆盖真实生产 worker 绑定，在结构上不可能。
@@ -98,14 +98,15 @@ git branch -d feat/<name>                          # ⑤ 删除
 
 > 全量键清单：本地 `.trellis/spec/governance/config-inventory.md`；各键权威注释在 `wrangler.jsonc` 与 `.dev.vars.example`（提交入库的模板）。
 
-1. **真实 secrets**（`BETTER_AUTH_SECRET` / `GATEWAY_SECRET_KEY` / `GITHUB_CLIENT_SECRET` / `RESEND_API_KEY`）→ **绝不进任何 jsonc / 文档 / 代码**。生产走 `wrangler secret put`（每环境独立；`GATEWAY_SECRET_KEY` 与 `BETTER_AUTH_SECRET` 分别随机生成、不得相同）；本地 dev 走 `.dev.vars`（gitignored，复制自 `.dev.vars.example`）；一键部署在 setup 页输入。
-2. **个性化 vars**（PII 与环境差异值 `BETTER_AUTH_URL` / `GITHUB_CLIENT_ID` / `GITHUB_ALLOWED_EMAILS`，加策略开关 `CACHE_ENABLED` / `EMAIL_VERIFICATION_ENABLED` / `EMAIL_ACCOUNT_ADMIN_PROMOTION_ENABLED` 等）→ `wrangler.jsonc` `[vars]` 承载**安全缺省**（开关缺省一律关闭，白名单空 = 拒绝，fail-closed）；部署后按收尾清单用 Dashboard vars 或维护者 fork 覆盖；本地覆盖走 `.dev.vars`（**只影响本地 dev**）。
+1. **真实 secrets**（`BETTER_AUTH_SECRET` / `GATEWAY_SECRET_KEY` / `GITHUB_CLIENT_SECRET` / `RESEND_API_KEY` / `SMS_ACCESS_KEY_ID` / `SMS_ACCESS_KEY_SECRET`）→ **绝不进任何 jsonc / 文档 / 代码**。生产走 `wrangler secret put`（每环境独立；`GATEWAY_SECRET_KEY` 与 `BETTER_AUTH_SECRET` 分别随机生成、不得相同）；本地 dev 走 `.dev.vars`（gitignored，复制自 `.dev.vars.example`）；一键部署在 setup 页输入。
+2. **个性化 vars**（PII 与环境差异值 `BETTER_AUTH_URL` / `GITHUB_CLIENT_ID` / `ADMIN_EMAILS`，加策略开关 `CACHE_ENABLED` / `EMAIL_VERIFICATION_ENABLED` / `EMAIL_ACCOUNT_ADMIN_PROMOTION_ENABLED` / `SMS_AUTH_ENABLED` 与短信面 `SMS_ALLOWED_PHONES` / `SMS_SIGN_NAME` / `SMS_TEMPLATE_CODE` / `SMS_TEMPLATE_CODE_RESET` / `SMS_TEMPLATE_PARAM` 等）→ `wrangler.jsonc` `[vars]` 承载**安全缺省**（开关缺省一律关闭，白名单空 = 拒绝，fail-closed；**`ADMIN_EMAILS` 空 = 无人自动提权（登录不受限）**；**短信白名单是唯一例外，空 = 全放行**，见关键坑）；部署后按收尾清单用 Dashboard vars 或维护者 fork 覆盖；本地覆盖走 `.dev.vars`（**只影响本地 dev**）。
 3. **基础设施资源 ID**（D1 database_id、KV id、Queue 名、worker 名、自定义域名）→ jsonc 字面量。提交形态是**占位 id**（按钮自动供给后回写真实值）；维护者把真实 id 与域名 routes 放进 `wrangler.prod.jsonc`。资源命名式 **`<worker 名>-<purpose>`**。域名是安全敏感值：提交形态**刻意零域名**（`tests/config-fork.test.ts` 断言不含维护者域名）。
 
 **关键坑（仍然成立）**：
 
 - `BETTER_AUTH_URL` 同时是双域名分流的「平台域」真源（`new URL(BETTER_AUTH_URL).hostname`，见 `src/lib/domains.ts`）。缺省 localhost 是已知错误值特征：管理面（`/api/*` 与 SPA）会被 301 到 `https://localhost/...`，`/v1` 照常——**部分可用**，部署后必须改成实际 origin。
-- GitHub OAuth 回调必须精确等于 `https://<origin>/api/auth/callback/github`（origin 与 `BETTER_AUTH_URL` 一致）；`GITHUB_ALLOWED_EMAILS` 为空 = 拒绝所有登录（fail-closed）。
+- GitHub OAuth 回调必须精确等于 `https://<origin>/api/auth/callback/github`（origin 与 `BETTER_AUTH_URL` 一致）；`ADMIN_EMAILS`（11-06 起）是**自动提权名单**：名单内邮箱的账号注册/登录即 admin（只升不降），**空 = 无人自动提权**；GitHub 登录本身不受名单限制（2026-11-06 起开放注册）。
+- **短信白名单语义与邮件白名单相反**：`SMS_ALLOWED_PHONES` 为空 = **全放行**（`EMAIL_ALLOWED_RECIPIENTS` 空 = 全拒）；写成全部非法值 = **全拒**（fail-closed，刻意不退化成全放行）。号码只认规范形 `+86` + `11` 位（`^\+861[3-9]\d{9}$`），落库/比对/白名单共用 `src/lib/phone.ts` 的同一判据。
 - `[[ratelimits]]` 的 `namespace_id` 是**账号级**命名空间：同账号同值跨 Worker 共享计数。一键部署用户各自部署到各自账号，1001/1002 无碰撞；**同账号部署多个实例时须自行错开段位**。
 - 本地 curl 验证线上可能需 `--ssl-no-revoke`（Windows schannel CRL）与自定义域名（workers.dev 域名在部分网络被 DNS 污染）。
 - cron 每日 02:00 UTC 清理 `request_logs`（保留 `REQUEST_LOG_RETENTION_DAYS`，缺省 30）。
@@ -117,20 +118,23 @@ git branch -d feat/<name>                          # ⑤ 删除
 
 - **一键部署（按钮）**：克隆仓库 → 按 `wrangler.jsonc` 自动供给 D1/KV/Queues（Free 计划即可——Queues 在 Free/Paid 均可用，Free 含 10,000 ops/天额度；2026-10-15 实证修订，此前「需 Paid」为过时断言）→ 回写资源 id → Workers Builds 从 `main` 构建发布。**迁移不自动执行**——收尾清单第 1 步手动 `npx wrangler d1 migrations apply DB --remote`。
 - **维护者生产部署**：本地生成 `wrangler.prod.jsonc`（真实 routes/id/vars；生成流程与字段表在本地 governance spec，**先加 .gitignore 再落盘**）→ `npm run deploy` 自动选中 → 探针验收。secrets 不进 fork，仍走 `wrangler secret put`。
-- **🔴 fork `[vars]` 部署前须人工核对**：实施期 fork 从本地 `.dev.vars` 生成，其中 `GITHUB_CLIENT_ID="placeholder-github-client-id"` / `GITHUB_ALLOWED_EMAILS`（本地测试邮箱）/ `EMAIL_VERIFICATION_ENABLED="true"` 是 **dev 遗留值**（真实生产值历来自部署 shell export，从未落 `.dev.vars`）。每次用 fork 部署前核对这五键（加 `BETTER_AUTH_URL` / `EMAIL_ALLOWED_RECIPIENTS`）为真实生产值；`wrangler deploy` banner 会打印解析值（`env.X ("...")` 行），据此最终确认。
-- **首个 admin 无自提升端点**：GitHub OAuth 登录（白名单内）→ 直接 D1 `UPDATE users SET role='admin' WHERE email=...`（唯一合法 bootstrap；**禁止 SQL INSERT 造用户**——Better Auth 哈希/绑定会被绕过）。无用户状态不能发邀请码，故 GitHub OAuth 是 bootstrap 唯一入口（README 收尾清单）。
+- **🔴 fork `[vars]` 部署前须人工核对**：实施期 fork 从本地 `.dev.vars` 生成，其中 `GITHUB_CLIENT_ID="placeholder-github-client-id"` / `ADMIN_EMAILS`（本地测试邮箱）/ `EMAIL_VERIFICATION_ENABLED="true"` 是 **dev 遗留值**（真实生产值历来自部署 shell export，从未落 `.dev.vars`）。每次用 fork 部署前核对这五键（加 `BETTER_AUTH_URL` / `EMAIL_ALLOWED_RECIPIENTS`）为真实生产值；`wrangler deploy` banner 会打印解析值（`env.X ("...")` 行），据此最终确认。
+- **首个 admin**：把邮箱加进 `ADMIN_EMAILS` 后 GitHub 登录即**自动提权**（注册/登录两处钩子，只升不降；2026-11-06 起）。未命中名单时仍可手工 D1 `UPDATE users SET role='admin' WHERE email=...`（**禁止 SQL INSERT 造用户**——Better Auth 哈希/绑定会被绕过）。无用户状态不能发邀请码，故 GitHub OAuth 是 bootstrap 唯一入口（README 收尾清单）。
+- **手机号硬门禁（2026-11-06）**：`SMS_AUTH_ENABLED=true` 时，未验证手机的账号调管理面 `/api/*` 一律 `403 PHONE_BINDING_REQUIRED`（`src/middleware/auth.ts` 的 `requireVerifiedPhone`，挂在 `requireSession` 之后）；allowlist 仅 `GET /api/me/profile` 与 `POST /api/me/password`。`/api/auth/*`、`/api/health`、`/api/config`、`/api/invites/*` 在前挂载天然豁免，`/v1`、`/anthropic` 不受影响。SPA 侧由 `/bind-phone` 页承接绑定；关开关即整体回滚。
 - **删队列前先删消费者**：`wrangler deploy` 不删旧 consumer（实测孤儿消费者会常驻）；删旧队列先 `consumer remove`，归零用 `purge`。**队列表不可改名**，改名 = 新建 + 改绑定 + 删旧，切换后旧队列在途消息永不被消费。
 - 资源命名式 `<worker 名>-<purpose>`；KV 是本栈唯一可原地改名的资源（`wrangler kv namespace rename`，按 id 寻址数据不动；**别用 key 计数前后对比验证数据还在**——活流量下计数是读数时刻的函数）。全表见本地 `config-inventory.md`。
-- 本地验证 `wrangler deploy --dry-run` 只证明配置结构合法（含队列存在性在内的资源就绪要账号侧实查，见上文陷阱②）。
+- 本地验证 `wrangler deploy --dry-run` 只证明配置结构合法（含队列存在性在内的资源就绪要账号侧实查，见上文陷阱②）；另注意 dry-run 会把本地 `.dev.vars`（**真实 secrets**）复制进 `dist/<worker 名>/.dev.vars`——`dist/*` 已 gitignore 故不入库，但该目录不要整包外发。
 
 ## 验收状态
 
 > 全量证据与复跑命令：本地 `.trellis/spec/governance/verification.md`。
 
 - 功能验收 AC1–AC9 全部 PASSED（本地 2026-08-25 `npm test` + lint + typecheck + dry-run 全绿；E2E `scripts/mock-upstream.mjs` + `verify-m3.mjs` / `verify-m4.mjs` 走 auth → keys → providers → /v1/* → 计费/限流/缓存）。AC6/AC9 已线上验证（2026-08-25，真实 GitHub OAuth 登录、双 admin 经 D1 提升）；认证面限流 AC11 已线上验证（2026-09-28，25 连发 22×401→3×429）。均为当时线上（含已退役的 staging）证据。
+- **2026-11-06 短信认证接入（`feat/sms-alicloud-auth`，Trellis `11-06-sms-alicloud-auth`）**：阿里云「短信认证」(`dypnsapi`) 通道 + 验证码登录/手机号注册/找回密码/绑定手机号 + `POST /api/me/password`；集成测试 `tests/sms-auth.test.ts`。**真实联调（阶段 12）为上线前置**：需部署方阿里云 AK + 签名/模板。
+- **2026-11-06 第二轮认证架构改版（同任务 §11 / R13–R19）**：手机号默认 `+86`（第三轮撤回国家码选择器，输入框只收 11 位本地号）；登录页**只有一个**「Email or phone number」标识框（密码/验证码共用）；**存量未验手机账号服务端硬门禁**（403 `PHONE_BINDING_REQUIRED`，SPA 走 `/bind-phone`）；注册三屏（邀请码+手机 OTP → 用户名密码 → 可选绑邮箱）；资料页可绑手机/邮箱/GitHub；**GitHub 开放注册**（首登须绑手机，全员 member）；`GITHUB_ALLOWED_EMAILS` 改名 `ADMIN_EMAILS`（自动提权名单，只升不降）；手机号注册占位邮箱格式 `u<5hex>.+86<11 位>@phone.invalid`（`isPlaceholderEmail` 后缀判据）。新增测试：`admin-emails` / `phone-binding-gate` / `change-email`。
 - **2026-10-14 一键部署适配后**：删除 `tests/render-config.unit.test.ts`（渲染管线拆除）与 `tests/seed-users.test.ts`（种子用户机制拆除），新增 `tests/config-fork.test.ts`（配置 fork 护栏）；全量测试/lint/typecheck/dry-run 复跑结果以该适配的交付报告与 CI 为准。
-- **单测清单（10-08 现状，10-14 适配后按上条增删）**：`tests/` 按域归组（省略 `.test.ts`）：代理管线与协议 26 个（anthropic-inbound、config-enhance、disguise、endpoint-face-gate、error-adapt、error-format、forward-headers.unit、http-options.unit、max-tokens-clamp、model-id.unit、model-mask.unit、protocol-detect、protocol-detect-integration、proxy-pipeline、reasoning-effort-mapping、responses-api、responses-reasoning-visibility、sdk-integration、stream-include-usage、stream-settle、stream-thinking-interop、thinking-passthrough、verbatim-engine、verbatim-fidelity、verbatim-passthrough、verbatim-response-side）；计费/余额/用量 9（billing、billing-queue、bonus.unit、model-price-display.unit、settings、signup-bonus、transactions、usage、usage-series.unit）；限流/缓存 4（auth-rate-limit、cache、rate-counter、rate-limit）；供应商与模型配置 15（modelcap-fastpath、modelcap-grid.unit、modelcaps.unit、models-api、multi-upstream、provider-declare-endpoint、provider-endpoints.unit、provider-form.unit、provider-key-mask.unit、provider-ping、provider-presets-route、provider-presets.unit、provider-router、provider-test-probe、provider-test-state.unit）；认证/账户/邀请 13（admin-promotion-policy.unit、admin-users-delete、admin-users-promotion-switch、api-keys、change-password、email、email-verification-send、invite-check.unit、invite-link.unit、invite-register、invite-validate、onboarding、profile）；管理台 UI 3（format、menu-position.unit、popover-position.unit）；基础设施/配置 5→4（domain-split、migration-rebuild、queue-dispatch、**config-fork**；render-config.unit 与 seed-users 已随拆除删除，modelcap-grid.unit 计入模型配置组）。
-- 已知偏差：`PATCH /api/admin/settings` 未实现（只读设计）；`recharge` 账目类型无端点写入（管理端充值记为 `adjust`）；`scripts/verify-codex-lite.mjs` 的 E2E_STG=1 模式随 staging 退役成为遗留死路（显式 fail-fast 并指向退役 runbook，未删除以保留参数对照）；线上环境需用户自带凭据（GitHub OAuth App client secret 经 `wrangler secret put`、上游供应商真实密钥部署后在管理台配置）。
+- **单测清单（10-08 现状，10-14 适配后按上条增删）**：`tests/` 按域归组（省略 `.test.ts`）：代理管线与协议 26 个（anthropic-inbound、config-enhance、disguise、endpoint-face-gate、error-adapt、error-format、forward-headers.unit、http-options.unit、max-tokens-clamp、model-id.unit、model-mask.unit、protocol-detect、protocol-detect-integration、proxy-pipeline、reasoning-effort-mapping、responses-api、responses-reasoning-visibility、sdk-integration、stream-include-usage、stream-settle、stream-thinking-interop、thinking-passthrough、verbatim-engine、verbatim-fidelity、verbatim-passthrough、verbatim-response-side）；计费/余额/用量 9（billing、billing-queue、bonus.unit、model-price-display.unit、settings、signup-bonus、transactions、usage、usage-series.unit）；限流/缓存 4（auth-rate-limit、cache、rate-counter、rate-limit）；供应商与模型配置 15（modelcap-fastpath、modelcap-grid.unit、modelcaps.unit、models-api、multi-upstream、provider-declare-endpoint、provider-endpoints.unit、provider-form.unit、provider-key-mask.unit、provider-ping、provider-presets-route、provider-presets.unit、provider-router、provider-test-probe、provider-test-state.unit）；认证/账户/邀请 21（**admin-emails**、admin-promotion-policy.unit、admin-users-delete、admin-users-promotion-switch、api-keys、aliyun-acs3.unit、**change-email**、change-password、email、email-verification-send、invite-check.unit、invite-link.unit、invite-register、invite-validate、**me-password**、onboarding、phone.unit、**phone-binding-gate**、profile、**sms-auth**、sms-errors.unit）；管理台 UI 3（format、menu-position.unit、popover-position.unit）；基础设施/配置 5→4（domain-split、migration-rebuild、queue-dispatch、**config-fork**；render-config.unit 与 seed-users 已随拆除删除，modelcap-grid.unit 计入模型配置组）。
+- 已知偏差：`PATCH /api/admin/settings` 未实现（只读设计）；短信面两条实测偏差（11-06）：OTP 尝试上限是「前 3 次各 400 `INVALID_OTP`、第 4 次 403 `TOO_MANY_ATTEMPTS`、第 5 次 400 `OTP_NOT_FOUND`」（PRD 措辞差一）；停用账号走验证码登录由 `session.create.before` 返回 false ⇒ 库回 **500 `FAILED_TO_CREATE_SESSION`**（不建会话，但不是 401/403；与邮箱登录同源）；`recharge` 账目类型无端点写入（管理端充值记为 `adjust`）；`scripts/verify-codex-lite.mjs` 的 E2E_STG=1 模式随 staging 退役成为遗留死路（显式 fail-fast 并指向退役 runbook，未删除以保留参数对照）；线上环境需用户自带凭据（GitHub OAuth App client secret 经 `wrangler secret put`、上游供应商真实密钥部署后在管理台配置）。
 
 ## API 参考
 
@@ -138,10 +142,12 @@ git branch -d feat/<name>                          # ⑤ 删除
 
 | 端点 | 访问权限 | 说明 |
 | --- | --- | --- |
-| `/api/auth/*` | public | Better Auth（邮箱密码、GitHub OAuth） |
+| `/api/auth/*` | public | Better Auth（邮箱密码、GitHub OAuth、短信验证码 phone-number 插件——后者由 `SMS_AUTH_ENABLED` 门控，关闭时整段 404） |
 | `/api/invites/validate` | public | 注册前预检邀请码（`valid: true/false`，只读不消耗，带限流） |
 | `/api/me/usage` | member | 本人用量聚合 + 明细（分页） |
 | `/api/me/transactions` | member | 本人余额账本（分页，类型/时间过滤） |
+| `GET /api/me/profile` | member | 账号资料（`name`/`email`/`hasPassword`/`phoneNumber`/`phoneNumberVerified`/`githubLinked` 等）；手机门禁 allowlist 内，绑定页据此渲染 |
+| `POST /api/me/password` | member | **设置**密码（仅首次；已有密码 → 400 `PASSWORD_ALREADY_SET`）；手机号注册账号靠它获得密码 |
 | `/api/keys` | member/admin | 本人网关密钥 CRUD（admin 可见全部） |
 | `/api/users` | admin | 用户列表/角色/状态、邀请、余额调整 |
 | `/api/providers` | admin | 上游供应商 CRUD（密钥 AES-GCM 加密，响应中打码） |
@@ -151,7 +157,11 @@ git branch -d feat/<name>                          # ⑤ 删除
 | `/api/admin/settings` | admin | 运行时默认值（只读） |
 | `/api/health` | public | 存活探针 |
 
-`/api/users` 的角色变更受部署侧账户安全开关 `EMAIL_ACCOUNT_ADMIN_PROMOTION_ENABLED` 约束：开关关闭（缺省）时，把邮箱注册账号提升为 `admin` 会被 `403` 拒绝，管理台对相应行禁用该操作。降级、状态变更、既有 admin 与首个 admin bootstrap（直接 D1 `UPDATE`）不受影响。
+`/api/users` 的角色变更受部署侧账户安全开关 `EMAIL_ACCOUNT_ADMIN_PROMOTION_ENABLED` 约束：开关关闭（缺省）时，把邮箱注册账号提升为 `admin` 会被 `403` 拒绝，管理台对相应行禁用该操作。降级、状态变更、既有 admin 与 `ADMIN_EMAILS` 自动提权不受影响。
+
+**手机号门禁**：`SMS_AUTH_ENABLED=true` 时，除 `/api/auth/*`、`/api/health`、`/api/config`、`/api/invites/*` 与 allowlist（`GET /api/me/profile`、`POST /api/me/password`）外，未验证手机账号的 `/api/*` 请求一律 `403`，错误体带 `code: "PHONE_BINDING_REQUIRED"`。
+
+短信认证（`SMS_AUTH_ENABLED` 门控，缺省关 = 下列端点**结构性 404**）：`/api/auth/phone-number/send-otp`、`/api/auth/phone-number/verify`（登录/注册，注册需带邀请码）、`/api/auth/sign-in/phone-number`（号码+密码）、`/api/auth/phone-number/request-password-reset`、`/api/auth/phone-number/reset-password`。号码只认规范形 `+86` + 11 位；登录页把用户输入的「邮箱或手机号」按 `@` 与 `normalizePhone` 分流到两个端点。
 
 **代理 API**（`/v1/*`、`/anthropic/*`，网关 key 鉴权，三个协议入口）：
 

@@ -32,6 +32,26 @@ export const profileSchema = z.object({
    * 182 kB 顶到 255 kB）。前端一律直取零依赖的 src/lib/password.ts。
    */
   hasPassword: z.boolean(),
+  /**
+   * 规范形手机号（`+861…`），未绑定为 null（11-06-sms-alicloud-auth）。
+   * 只向**本人**下发完整号码 —— 本端点的 userId 恒取自会话（/me 路径），不接参数。
+   */
+  phoneNumber: z.string().nullable(),
+  /** 号码是否已验证（插件写入；本轮只有 verify 链路会置 true）。 */
+  phoneNumberVerified: z.boolean(),
+  /**
+   * 短信认证总开关（SMS_AUTH_ENABLED 经 isSmsAuthEnabled 解析的生效值）。
+   * 与 emailVerificationEnabled 同一口径：开关关闭时 phone-number 插件整段不注册，
+   * 前端不能靠「调一下看看」发现，必须读这个字段。
+   */
+  smsAuthEnabled: z.boolean(),
+  /**
+   * 是否已绑定 GitHub 账号（11-06-sms-alicloud-auth，PRD R16 / design §13.3）。
+   * 判据：accounts 表存在 providerId='github' 且 userId=本人的行（OAuth 建号与
+   * 「已登录用户 link-social 绑定」两条路径都会落这一行）。
+   * 资料页据此显示「已绑定 / 可绑定」；不暴露 GitHub 侧的 id 或 token。
+   */
+  githubLinked: z.boolean(),
 });
 
 export const profileOutputSchema = z.object({

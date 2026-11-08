@@ -3,16 +3,23 @@
 
 export class ApiError extends Error {
   readonly status: number;
+  /**
+   * 服务端错误码（11-06-sms-alicloud-auth）。可选：多数端点只回 `{ error: { message } }`，
+   * 只有明确需要前端分支的端点才带 code（如 `POST /api/me/password` 的 `PASSWORD_ALREADY_SET`）。
+   * **不要**把 code 当展示文案 —— 文案映射见 `app/lib/sms-errors.ts`。
+   */
+  readonly code: string | undefined;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, code?: string) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.code = code;
   }
 }
 
 interface ApiErrorBody {
-  error?: { message?: string };
+  error?: { message?: string; code?: string };
 }
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -24,16 +31,18 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 
   if (!response.ok) {
     let message = `Request failed with status ${response.status}`;
+    let code: string | undefined;
     try {
       const body = (await response.json()) as ApiErrorBody;
       const detail = body.error?.message;
       if (detail) {
         message = detail;
       }
+      code = typeof body.error?.code === "string" ? body.error.code : undefined;
     } catch {
       // 非 JSON 错误体：保留默认消息
     }
-    throw new ApiError(message, response.status);
+    throw new ApiError(message, response.status, code);
   }
 
   if (response.status === 204) {

@@ -114,6 +114,22 @@ describe("authRateLimitBucket — 路径→桶映射（纯函数）", () => {
     expect(authRateLimitBucket("/api/invites/validate")).toBe("credential");
   });
 
+  it("短信认证（11-06）：phone-number 插件的 5 条**可路由**端点全部落桶", () => {
+    // 口径与邮件面同构：会往外发短信的进 email 桶（每次命中真发一条、真扣费），
+    // 校验/提交凭据的进 credential 桶（6 位码空间有限，不限流等于可爆破）。
+    expect(authRateLimitBucket("/api/auth/sign-in/phone-number")).toBe("credential");
+    expect(authRateLimitBucket("/api/auth/phone-number/verify")).toBe("credential");
+    expect(authRateLimitBucket("/api/auth/phone-number/reset-password")).toBe("credential");
+    expect(authRateLimitBucket("/api/auth/phone-number/send-otp")).toBe("email");
+    expect(authRateLimitBucket("/api/auth/phone-number/request-password-reset")).toBe("email");
+
+    // 判别力：这五条若被写成「按前缀放行」，下面这些近似路径会跟着命中；
+    // 反过来「漏写某条」时，对应断言直接变红（而不是静默不限流）。
+    expect(authRateLimitBucket("/api/auth/phone-number")).toBeNull();
+    expect(authRateLimitBucket("/api/auth/phone-number/send-otp/extra")).toBeNull();
+    expect(authRateLimitBucket("/api/auth/phone-number/verify/2")).toBeNull();
+  });
+
   it("未列举端点一律 null（不限流也不耗配额）", () => {
     for (const path of [
       "/api/auth/get-session",

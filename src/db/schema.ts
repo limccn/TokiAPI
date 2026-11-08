@@ -43,6 +43,15 @@ export const users = sqliteTable(
       .default(false),
     image: text("image"),
     githubId: text("github_id").unique(),
+    // 手机号（11-06-sms-alicloud-auth）：**规范形** `+86` + 11 位（见 src/lib/phone.ts）。
+    // 唯一 —— 一个号码只能挂一个账号（邮箱/手机号账号可各自独立存在，但号码不可重复）。
+    // NULL = 未绑定；短信注册时由插件写入并置 verified。
+    phoneNumber: text("phone_number").unique(),
+    // 号码是否经短信验证码验证过（插件在 verify 建号/绑定时写 true）。
+    // notNull + default(false)：存量行自动为 false，无需回填。
+    phoneNumberVerified: integer("phone_number_verified", { mode: "boolean" })
+      .notNull()
+      .default(false),
     // 赠金幂等标记（09-16-signup-bonus-grant）：NULL = 该档未发放；非 NULL = 已发放时间。
     // 均为 nullable 无默认值（迁移只增不改）；条件 UPDATE 的 WHERE 依据，
     // 并发两次触发只有一次能命中（配合 balance_tx_bonus_once_idx 部分唯一索引双保险）。

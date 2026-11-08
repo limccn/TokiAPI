@@ -49,6 +49,17 @@ const BUCKET_BY_PATH: ReadonlyMap<string, AuthRateLimitBucket> = new Map([
   ["/api/auth/send-verification-email", "email"],
   ["/api/auth/request-password-reset", "email"],
   ["/api/auth/sign-up/email", "email"],
+  // 短信认证（11-06-sms-alicloud-auth，design §6）：phone-number 插件的 5 条匿名路径。
+  // 分桶口径与邮件面同构 —— **会往外发短信的进 email 桶**（每次命中真的发一条短信、真扣费），
+  // **校验/提交凭据的进 credential 桶**。漏列即新增无限爆破口（F1 那条事故的形态）。
+  // ⚠ 两条名字容易写错的：`request-password-reset`（不是 forget-password）、
+  //    `sign-in/phone-number`（手机号登录是**独立端点**，不吃 `sign-in/email` 那条）。
+  // 6 位数字码本身也只有限的空间 ⇒ 校验面入桶是必需的，不是锦上添花。
+  ["/api/auth/sign-in/phone-number", "credential"],
+  ["/api/auth/phone-number/send-otp", "email"],
+  ["/api/auth/phone-number/verify", "credential"],
+  ["/api/auth/phone-number/request-password-reset", "email"],
+  ["/api/auth/phone-number/reset-password", "credential"],
   // 批次 U（D30）：注册页邀请码预校验（GET /api/invites/validate，**匿名可打**）——
   // 不在 better-auth 路径表内（上面几条才是逐条比对 createAuthEndpoint 的产物）。
   // 按「凭据猜测」口径压进 credential 桶：复用 AUTH_CREDENTIAL_LIMIT binding ⇒ 零配置改动。

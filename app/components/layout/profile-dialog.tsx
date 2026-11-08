@@ -20,11 +20,23 @@
 import { useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { authClient } from "@/lib/auth-client";
+import { useSmsCodeSender } from "@/hooks/use-sms-code";
+import { smsErrorMessage, type SmsErrorLike } from "@/lib/sms-errors";
+import {
+  INVALID_CODE_MESSAGE,
+  INVALID_PHONE_MESSAGE,
+  composePhoneNumber,
+  toSmsCode,
+} from "@/lib/phone-input";
+// 直取零依赖的 src/lib/phone.ts（理由见该文件头注：中转模块会拖进首屏）
+import { isPlaceholderEmail, maskPhone } from "../../../src/lib/phone";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PhoneNumberInput } from "@/components/ui/phone-number-input";
+import { SendCodeButton } from "@/components/ui/send-code-button";
 import { useProfile } from "@/modules/profile/hooks/use-profile";
 import type { Profile } from "@/modules/profile/types";
 
@@ -87,6 +99,14 @@ function ProfileForm({ profile, onClose }: { profile: Profile; onClose: () => vo
   const [resendStatus, setResendStatus] = useState<"idle" | "pending" | "requested">("idle");
   const [resendError, setResendError] = useState<string | null>(null);
 
+  // ---- 绑定邮箱（11-06-sms-alicloud-auth，PRD R16 / design §13.5）----
+  // 只对**占位邮箱**账号开放，且部署开启邮箱验证时才有入口；已绑定真实邮箱的账号本轮不可改绑。
+  const [emailBinding, setEmailBinding] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
+  const [newEmailError, setNewEmailError] = useState<string | null>(null);
+  const [emailBindError, setEmailBindError] = useState<string | null>(null);
+  const [emailBindStatus, setEmailBindStatus] = useState<"idle" | "pending" | "sent">("idle");
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setFormError(null);
@@ -135,6 +155,43 @@ function ProfileForm({ profile, onClose }: { profile: Profile; onClose: () => vo
     }
   };
 
+  const handleBindEmail = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setNewEmailError(null);
+    setEmailBindError(null);
+    const target = newEmail.trim();
+    // 轻量格式判据：真正的校验在服务端（Better Auth changeEmail）；这里只挡明显笔误
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(target)) {
+      setNewEmailError("Enter a valid email address");
+      return;
+    }
+    setEmailBindStatus("pending");
+    try {
+      // 占位邮箱未验证 ⇒ changeEmail 命中 canUpdateWithoutVerification：地址立即写入，
+      // 随后发验证信；点击链接后 emailVerified=true（design §13.5）。
+      const { error } = await authClient.changeEmail({
+        newEmail: target,
+        callbackURL: window.location.href,
+      });
+      if (error) {
+        setEmailBindStatus("idle");
+        setEmailBindError(error.message ?? "Failed to send the verification email");
+        return;
+      }
+      setEmailBindStatus("sent");
+      setEmailBinding(false);
+      // 地址已即时写入：重取 profile，让邮箱行从 Not set 切到新地址（未验证）
+      await queryClient.invalidateQueries({ queryKey: ["profile"] });
+    } catch {
+      setEmailBindStatus("idle");
+      setEmailBindError("Failed to send the verification email");
+    }
+  };
+
+  // 判据取后端同一份零依赖函数（后缀 `@phone.invalid`）：新旧占位邮箱格式同时命中。
+  // 不在前端另写正则 —— 格式升级时两处必然漂移（design §13.2）。
+  const placeholderEmail = isPlaceholderEmail(profile.email);
+
   return (
     <div className="space-y-6">
       <form onSubmit={handleSubmit} className="space-y-3" noValidate>
@@ -175,51 +232,368 @@ function ProfileForm({ profile, onClose }: { profile: Profile; onClose: () => vo
         <Label htmlFor="profile-email">Email</Label>
         <Input
           id="profile-email"
-          value={profile.email}
+          // 手机号注册的账号没有真实邮箱：显示 `Not set`，而不是把内部占位地址亮给用户
+          // （11-06-sms-alicloud-auth，PRD R18 / design §7.5）
+          value={placeholderEmail ? "Not set" : profile.email}
           readOnly
           className="bg-muted text-muted-foreground"
-          aria-describedby="profile-email-note"
+          aria-describedby={
+            !placeholderEmail || !emailBinding ? "profile-email-note" : undefined
+          }
         />
-        <p id="profile-email-note" className="text-xs text-muted-foreground">
-          Email cannot be changed.
-        </p>
+        {placeholderEmail ? (
+          profile.smsAuthEnabled && profile.emailVerificationEnabled ? (
+            emailBinding ? (
+              <form onSubmit={handleBindEmail} className="space-y-2" noValidate>
+                {emailBindError !== null ? (
+                  <p role="alert" className="text-xs text-destructive">
+                    {emailBindError}
+                  </p>
+                ) : null}
+                <div className="flex flex-wrap gap-2">
+                  <Input
+                    id="profile-new-email"
+                    type="email"
+                    autoComplete="email"
+                    // 邮箱地址上限（RFC 5321 的 254）
+                    maxLength={254}
+                    placeholder="you@example.com"
+                    value={newEmail}
+                    onChange={(event) => {
+                      setNewEmail(event.target.value);
+                      setNewEmailError(null);
+                    }}
+                    aria-label="Email address"
+                    aria-invalid={newEmailError !== null}
+                    // 窄视口独占一行（三个控件挤一行会把输入框压到 150px 以下），
+                    // 宽视口回到「输入框 + 两个按钮」同一行
+                    className="min-w-0 flex-1 basis-full sm:basis-0"
+                  />
+                  <Button type="submit" size="sm" disabled={emailBindStatus === "pending"}>
+                    {emailBindStatus === "pending" ? "Sending…" : "Bind email"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setEmailBinding(false);
+                      setNewEmailError(null);
+                      setEmailBindError(null);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+                {newEmailError !== null ? (
+                  <p className="text-xs text-destructive">{newEmailError}</p>
+                ) : null}
+              </form>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <p id="profile-email-note" className="text-xs text-muted-foreground">
+                  This account signs in with a phone number. Add an email to receive notifications
+                  and recover access.
+                </p>
+                <Button variant="outline" size="sm" onClick={() => setEmailBinding(true)}>
+                  Bind email
+                </Button>
+              </div>
+            )
+          ) : (
+            <p id="profile-email-note" className="text-xs text-muted-foreground">
+              This account signs in with a phone number. Email binding is not enabled on this
+              deployment.
+            </p>
+          )
+        ) : (
+          <p id="profile-email-note" className="text-xs text-muted-foreground">
+            Email cannot be changed.
+          </p>
+        )}
+        {emailBindStatus === "sent" ? (
+          // 只在服务端确认 changeEmail 成功后出现；验证完成前新地址仍是「未验证」。
+          <p role="status" className="text-xs text-muted-foreground">
+            Verification email sent to {newEmail}. Open the link in that email to finish linking it.
+            Check your spam folder if it does not arrive within a few minutes.
+          </p>
+        ) : null}
       </div>
 
+      {/* 占位邮箱整块不渲染：既没有可发的地址，也不该对「从未提供过的邮箱」催验证。
+          开关关闭 + 未验证的普通账号仍走原分支（R6/R7/AC9）。 */}
+      {placeholderEmail ? null : (
+        <div className="space-y-2">
+          <p className="text-sm font-medium leading-none">Email verification</p>
+          <div className="flex flex-wrap items-center gap-2">
+            {profile.emailVerified ? (
+              <Badge variant="success">Verified</Badge>
+            ) : (
+              <Badge variant="muted">Not verified</Badge>
+            )}
+            {/* R6/R7/AC9：只有「未验证 + 开关开启」才出现操作入口；开关关闭时仅静默展示状态 */}
+            {!profile.emailVerified && profile.emailVerificationEnabled ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void handleResend()}
+                disabled={resendStatus === "pending"}
+              >
+                {resendStatus === "pending" ? "Requesting…" : "Resend verification email"}
+              </Button>
+            ) : null}
+          </div>
+          {resendError !== null ? (
+            <p role="alert" className="text-xs text-destructive">
+              {resendError}
+            </p>
+          ) : null}
+          {resendStatus === "requested" ? (
+            // 文案诚实性（design §5 前端文案）：这句只在服务端**真把信交给 Resend** 时出现 ——
+            // 交互式路径的发送失败会由 better-auth 上抛成非 2xx（走上面的 resendError 分支），
+            // 不会落到这里。故不得写「可能没发」这类含糊措辞，只说发送结果与后续动作。
+            <p role="status" className="text-xs text-muted-foreground">
+              Verification email sent to {profile.email}. Check your spam folder if it does not
+              arrive within a few minutes.
+            </p>
+          ) : null}
+        </div>
+      )}
+
+      <PhoneSection profile={profile} />
+      <GithubSection profile={profile} />
+    </div>
+  );
+}
+
+/**
+ * 手机号行（11-06-sms-alicloud-auth，design §7.5）。
+ *
+ * 三种形态，判据全部来自 GET /api/me/profile（**不**另取 /api/config —— 同一个开关
+ * 两处下发就有了漂移点）：
+ *   ① 已绑定 → 打码展示 + Verified 徽标；
+ *   ② 未绑定 + 开关开启 → Bind phone → 号码 + 验证码 → `verify({ updatePhoneNumber: true })`；
+ *   ③ 未绑定 + 开关关闭 → 整行不渲染（没有可做之事，留一个永远用不了的入口只会让人点）。
+ */
+function PhoneSection({ profile }: { profile: Profile }) {
+  const queryClient = useQueryClient();
+  const [binding, setBinding] = useState(false);
+  const [phone, setPhone] = useState("");
+  const [code, setCode] = useState("");
+  // 字段错误内联在各自输入框下方（与 /bind-phone 同一形态），error 只留绑定失败的整段错误
+  const [fieldErrors, setFieldErrors] = useState<{ phone?: string; code?: string }>({});
+  const [error, setError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const smsSender = useSmsCodeSender();
+
+  if (profile.phoneNumber !== null) {
+    return (
       <div className="space-y-2">
-        <p className="text-sm font-medium leading-none">Email verification</p>
+        <p className="text-sm font-medium leading-none">Phone number</p>
         <div className="flex flex-wrap items-center gap-2">
-          {profile.emailVerified ? (
+          <span className="text-sm">{maskPhone(profile.phoneNumber)}</span>
+          {profile.phoneNumberVerified ? (
             <Badge variant="success">Verified</Badge>
           ) : (
             <Badge variant="muted">Not verified</Badge>
           )}
-          {/* R6/R7/AC9：只有「未验证 + 开关开启」才出现操作入口；开关关闭时仅静默展示状态 */}
-          {!profile.emailVerified && profile.emailVerificationEnabled ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void handleResend()}
-              disabled={resendStatus === "pending"}
-            >
-              {resendStatus === "pending" ? "Requesting…" : "Resend verification email"}
-            </Button>
-          ) : null}
         </div>
-        {resendError !== null ? (
-          <p role="alert" className="text-xs text-destructive">
-            {resendError}
-          </p>
-        ) : null}
-        {resendStatus === "requested" ? (
-          // 文案诚实性（design §5 前端文案）：这句只在服务端**真把信交给 Resend** 时出现 ——
-          // 交互式路径的发送失败会由 better-auth 上抛成非 2xx（走上面的 resendError 分支），
-          // 不会落到这里。故不得写「可能没发」这类含糊措辞，只说发送结果与后续动作。
-          <p role="status" className="text-xs text-muted-foreground">
-            Verification email sent to {profile.email}. Check your spam folder if it does not
-            arrive within a few minutes.
-          </p>
-        ) : null}
       </div>
+    );
+  }
+
+  if (!profile.smsAuthEnabled) {
+    return null;
+  }
+
+  const handleSendCode = async () => {
+    setError(null);
+    const phoneNumber = composePhoneNumber(phone);
+    if (phoneNumber === null) {
+      setFieldErrors((prev) => ({ ...prev, phone: INVALID_PHONE_MESSAGE }));
+      return;
+    }
+    setFieldErrors((prev) => ({ ...prev, phone: undefined }));
+    await smsSender.send(phoneNumber);
+  };
+
+  const handleBind = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError(null);
+    const phoneNumber = composePhoneNumber(phone);
+    const trimmedCode = code.trim();
+    const errors: typeof fieldErrors = {
+      phone: phoneNumber === null ? INVALID_PHONE_MESSAGE : undefined,
+      code: /^\d{6}$/.test(trimmedCode) ? undefined : INVALID_CODE_MESSAGE,
+    };
+    setFieldErrors(errors);
+    if (phoneNumber === null || errors.code !== undefined) {
+      return;
+    }
+    setIsSaving(true);
+    try {
+      const { error: verifyError } = await authClient.phoneNumber.verify({
+        phoneNumber,
+        code: trimmedCode,
+        updatePhoneNumber: true,
+      });
+      if (verifyError) {
+        setError(smsErrorMessage(verifyError as SmsErrorLike, "profile"));
+        return;
+      }
+      // 绑定成功后让本弹窗重取 profile（已绑定形态 + Verified 徽标由服务端值决定）
+      await queryClient.invalidateQueries({ queryKey: ["profile"] });
+      setBinding(false);
+      setPhone("");
+      setCode("");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <p className="text-sm font-medium leading-none">Phone number</p>
+      {binding ? (
+        <form onSubmit={handleBind} className="space-y-3">
+          {error !== null || smsSender.error !== null ? (
+            <p role="alert" className="text-xs text-destructive">
+              {error ?? smsSender.error}
+            </p>
+          ) : null}
+          <div className="space-y-1">
+            <PhoneNumberInput
+              id="profile-phone-input"
+              value={phone}
+              onValueChange={(digits) => {
+                setPhone(digits);
+                setFieldErrors((prev) => ({ ...prev, phone: undefined }));
+              }}
+              aria-label="Phone number"
+              aria-invalid={fieldErrors.phone !== undefined}
+            />
+            {fieldErrors.phone !== undefined ? (
+              <p className="text-xs text-destructive">{fieldErrors.phone}</p>
+            ) : null}
+          </div>
+          <div className="space-y-1">
+            {/* 发码按钮与验证码输入框同一行（与登录/注册/绑定页一致）；提示行不再出现 */}
+            <div className="flex items-start gap-2">
+              <div className="min-w-0 flex-1 space-y-1">
+                <Input
+                  id="profile-phone-code"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  // 不加 maxLength：浏览器先截原始文本会在清洗前丢掉粘贴里的位数，截断交给 toSmsCode
+                  placeholder="6-digit code"
+                  value={code}
+                  onChange={(event) => {
+                    const next = toSmsCode(event.target.value);
+                    if (event.target.value !== next) {
+                      event.target.value = next;
+                    }
+                    setCode(next);
+                    setFieldErrors((prev) => ({ ...prev, code: undefined }));
+                  }}
+                  aria-label="Verification code"
+                  aria-invalid={fieldErrors.code !== undefined}
+                />
+                {fieldErrors.code !== undefined ? (
+                  <p className="text-xs text-destructive">{fieldErrors.code}</p>
+                ) : null}
+              </div>
+              <SendCodeButton
+                layout="button"
+                isSending={smsSender.isSending}
+                cooldownSeconds={smsSender.cooldownSeconds}
+                onSend={() => void handleSendCode()}
+              />
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button type="submit" size="sm" disabled={isSaving}>
+                {isSaving ? "Binding…" : "Bind phone"}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setBinding(false);
+                  setError(null);
+                  setFieldErrors({});
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </form>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm text-muted-foreground">Not set</span>
+          <Button variant="outline" size="sm" onClick={() => setBinding(true)}>
+            Bind phone
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * GitHub 绑定行（11-06-sms-alicloud-auth，PRD R16 / design §13.3）。
+ *
+ * 本轮**只做绑定**：已绑定显示状态，不提供解绑入口。
+ * 判据是服务端下发的 `githubLinked`（accounts 表 providerId='github' 的存在性）——
+ * 前端不得从 session/provider 推导。
+ */
+function GithubSection({ profile }: { profile: Profile }) {
+  const [error, setError] = useState<string | null>(null);
+  const [isLinking, setIsLinking] = useState(false);
+
+  const handleLink = async () => {
+    setError(null);
+    setIsLinking(true);
+    try {
+      const { error: linkError } = await authClient.linkSocial({
+        provider: "github",
+        callbackURL: `${window.location.origin}/dashboard`,
+      });
+      if (linkError) {
+        setError(linkError.message ?? "Failed to start GitHub linking");
+        setIsLinking(false);
+      }
+      // 成功时浏览器会被重定向到 GitHub，保持 pending 避免按钮闪回可用
+    } catch {
+      setError("Failed to start GitHub linking");
+      setIsLinking(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <p className="text-sm font-medium leading-none">GitHub</p>
+      {profile.githubLinked ? (
+        // 与上方 Email verification 段同形：状态只由徽标表达，不再重复一行文字
+        <Badge variant="success">Linked</Badge>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm text-muted-foreground">Not linked</span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void handleLink()}
+            disabled={isLinking}
+          >
+            {isLinking ? "Redirecting…" : "Link GitHub"}
+          </Button>
+        </div>
+      )}
+      {error !== null ? (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }
