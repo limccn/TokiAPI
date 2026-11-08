@@ -1,19 +1,21 @@
-// /login — 登录页（M6 6.2；11-06-sms-alicloud-auth 第二轮改版 + 第三轮微调）。
+// /login — 登录页（M6 6.2；11-06-sms-alicloud-auth 改版，11-08 R9 改分段控件）。
 //
-// 全页**只有一个**标识输入框（Email or phone number，PRD R21）：含 `@` ⇒ signIn.email；
-// 否则按中国内地手机号处理，值 = `+86` + 11 位本地号拼成的规范形（PRD R20：不再提供国家码下拉）。
-// 密码登录与验证码登录共用这一个输入框 —— 切换模式只换密码/验证码字段，不换标识。
-// 客户端**先拦**三种确定失败：
-//   - 号码不合法 ⇒ 内联错误，不发请求；
-//   - 是手机号但部署没开短信认证 ⇒ 明确说「本部署未开启」，而不是让用户拿到一个 404。
-//     ⚠ 只有**确定**关闭（/api/config 已到达且为 false）才拦；配置还在路上时放行，
-//     真关闭的话服务端 404 会由下面的 404 兜底文案接住。
+// 表单顶部是 Email / Phone 分段控件（`aria-pressed` 表达当前段，不引入 tab 语义）：
+//   - Email 段：`type="email"` 输入 + 密码 → `authClient.signIn.email`（表单已 noValidate，
+//     浏览器格式拦截不生效；格式不对由服务端返回文案）；
+//   - Phone 段：`PhoneNumberInput`（`withCountrySelector`）+ 密码 →
+//     `composePhoneNumber` 拼规范形（`+86` + 11 位）→ `authClient.signIn.phoneNumber`。
+//     段内还有次级切换：密码登录 ⇄ 短信验证码登录（`smsMode`，发码/验证共用本段号码）。
+// 切段只清错误（上一段的失败原因不再适用）并在切回 Email 时退出 smsMode；两段各自保留
+// 已输入值，来回切换不丢。`/api/config` 确认 `smsAuthEnabled === false` 时不渲染 Phone 段
+// —— 此时 phone-number 插件整段 404；配置未到达（unknown）时渲染，由 404 兜底文案接住。
 //
-// 登录成功后的去向（PRD R14 / R19，design §13.7）：
+// 登录成功后的去向（PRD R14 / R19，design §13.7；11-08 R8 加后门判据）：
 //   - 短信开关关闭 ⇒ 原目的地（`from` 或 /dashboard）；
-//   - 开关开启 ⇒ 读 `GET /api/me/profile`，`phoneNumberVerified !== true` 的账号先去
-//     `/bind-phone`（服务端门禁是最终防线，前端重定向只为避免落进 403 的空页面）。
-//   `useProfile` 的 enabled 用 `!!user && smsAuthEnabled` —— 会话与开关都成立才请求，
+//   - 开关开启 ⇒ 读 `GET /api/me/profile`，`needsPhoneBinding`（手机未验证且未命中
+//     ADMIN_EMAILS 后门）的账号先去 `/bind-phone`（服务端门禁是最终防线，前端重定向只为
+//     避免落进 403 的空页面）。判据走 app/lib/phone-gate.ts 的单一函数，前端不解析名单。
+//   `useProfile` 的 enabled 用 `!!user && smsStatus === "on"` —— 会话与开关都成立才请求，
 //   不在匿名态白拿一次 401，也不伪造 SessionUser 里不存在的 phoneNumberVerified 字段。
 //
 // SMS 验证码面（仅开关开启时出现）：号码 → Send code（成功后 60s 冷却）→ 6 位码 → verify。
@@ -32,31 +34,60 @@ import { useSmsCodeSender } from "@/hooks/use-sms-code";
 import { apiFetch } from "@/lib/api";
 import { smsErrorMessage, type SmsErrorLike } from "@/lib/sms-errors";
 import { useProfile } from "@/modules/profile/hooks/use-profile";
+import { needsPhoneBinding } from "@/lib/phone-gate";
 import {
   INVALID_CODE_MESSAGE,
   INVALID_PHONE_MESSAGE,
   composePhoneNumber,
-  toNationalDigits,
   toSmsCode,
 } from "@/lib/phone-input";
 // type-only 导入（完全擦除、零运行时成本）：响应契约与服务端单一真源
 import type { ProfileOutput } from "../../src/routes/profile/types";
+import { cn } from "@/lib/utils";
 import { AuthCard } from "@/components/layout/auth-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PhoneNumberInput } from "@/components/ui/phone-number-input";
 import { SendCodeButton } from "@/components/ui/send-code-button";
 
-const loginFormSchema = z.object({
-  // 字段名从 email 改成 identifier：格式判别交给页面里的 `@` 分流，
-  // 这里只做「非空」—— 两处各写一套邮箱/号码正则必然漂移。
-  identifier: z.string().min(1, "Email or phone number is required"),
+type LoginMethod = "email" | "phone";
+
+// 每个段只校验自己的标识字段 + 共用密码（不校验另一段的残留值）。
+const emailFormSchema = z.object({
+  email: z.string().min(1, "Email is required"),
   password: z.string().min(1, "Password is required"),
 });
 
-type LoginForm = z.infer<typeof loginFormSchema>;
+const phoneFormSchema = z.object({
+  phoneDigits: z.string().min(1, "Phone number is required"),
+  password: z.string().min(1, "Password is required"),
+});
 
-const INVALID_IDENTIFIER = "Enter a valid email or mainland China mobile number.";
+interface FieldErrors {
+  email?: string;
+  phone?: string;
+  password?: string;
+}
+
+interface IssueLike {
+  path: readonly PropertyKey[];
+  message: string;
+}
+
+/** zod issue → 本页内联错误（phoneDigits 落在号码字段下；其余段以外的 issue 忽略）。 */
+function collectFieldErrors(issues: readonly IssueLike[]): FieldErrors {
+  const next: FieldErrors = {};
+  for (const issue of issues) {
+    const raw = issue.path[0];
+    const field = raw === "phoneDigits" ? "phone" : raw;
+    if (field === "email" || field === "phone" || field === "password") {
+      next[field] ??= issue.message;
+    }
+  }
+  return next;
+}
+
 const PHONE_DISABLED = "Phone sign-in is not enabled on this deployment.";
 
 /** 服务端未注册 phoneNumber 插件时是 404（插件整段不注册）—— 别把 "Not found" 端给用户。 */
@@ -73,30 +104,39 @@ export default function LoginPage() {
   const queryClient = useQueryClient();
 
   // 三态而非布尔：配置未到达（unknown）与确定关闭（off）不能同等对待 ——
-  // 前者放行（由服务端 404 兜底），后者客户端直接拦（design §7.2）。
+  // 前者放行（由服务端 404 兜底），后者不渲染 Phone 段（design §7.2 / §13.1）。
   const smsStatus: "unknown" | "on" | "off" =
     config.data === undefined ? "unknown" : config.data.smsAuthEnabled ? "on" : "off";
 
   // 已登录访客的去向判据（design §13.7）：开关开启时以服务端 profile 为准。
   const profileQuery = useProfile({ enabled: !!user && smsStatus === "on" });
 
-  const [identifier, setIdentifier] = useState("");
+  const [method, setMethod] = useState<LoginMethod>("email");
+  // 配置异步到达时可能把用户已选的 Phone 段「抽走」：off 时一律按 Email 段渲染与提交，
+  // 避免停在一个没有插件支撑的表单里（Phone 按钮同时不渲染）。
+  const activeMethod: LoginMethod = smsStatus === "off" ? "email" : method;
+
+  const [email, setEmail] = useState("");
+  const [phoneDigits, setPhoneDigits] = useState("");
   const [password, setPassword] = useState("");
-  const [errors, setErrors] = useState<Partial<Record<keyof LoginForm, string>>>({});
+  const [errors, setErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [phoneSignInFailed, setPhoneSignInFailed] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // ---- SMS 验证码面 ----
-  // 与密码面共用同一个 identifier 输入框（PRD R21）：本组状态只承载「模式」与验证码。
+  // ---- SMS 验证码面（仅 Phone 段）----
+  // 与密码方式共用 Phone 段的号码输入框：本组状态只承载「方式」与验证码。
   const [smsMode, setSmsMode] = useState(false);
   const [smsCode, setSmsCode] = useState("");
-  // 字段错误走内联（与 identifier/password 及注册/绑定/找回三页同一形态），
+  // 字段错误走内联（与号码/密码及注册/绑定/找回三页同一形态），
   // smsError 只留认证失败的整表错误
   const [smsCodeError, setSmsCodeError] = useState<string | null>(null);
   const [smsError, setSmsError] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const smsSender = useSmsCodeSender();
+
+  // 验证码视图要求 Phone 段仍可见（smsMode 单独为 true 不构成视图）
+  const smsView = activeMethod === "phone" && smsMode;
 
   const from = (location.state as { from?: string } | null)?.from;
 
@@ -109,9 +149,9 @@ export default function LoginPage() {
   if (user) {
     if (smsStatus === "on") {
       if (profileQuery.data !== undefined) {
-        const target = profileQuery.data.profile.phoneNumberVerified
-          ? (from ?? "/dashboard")
-          : "/bind-phone";
+        const target = needsPhoneBinding(profileQuery.data.profile)
+          ? "/bind-phone"
+          : (from ?? "/dashboard");
         return <Navigate to={target} replace />;
       }
       if (profileQuery.isPending) {
@@ -124,7 +164,7 @@ export default function LoginPage() {
 
   /**
    * 登录成功后的统一去向。短信开启时**立即**取一次服务端 profile（同一 queryKey 会
-   * 顺带填好上面守卫用的缓存），未验手机 → /bind-phone；读取失败则放行 ——
+   * 顺带填好上面守卫用的缓存），`needsPhoneBinding` 为真 → /bind-phone；读取失败则放行 ——
    * 把用户卡在登录页比多一次 403 更糟，AppLayout 与服务端门禁会接住。
    */
   const goAfterSignIn = async () => {
@@ -138,7 +178,7 @@ export default function LoginPage() {
         queryFn: () => apiFetch<ProfileOutput>("/api/me/profile"),
         staleTime: 0,
       });
-      if (result.profile.phoneNumberVerified !== true) {
+      if (needsPhoneBinding(result.profile)) {
         navigate("/bind-phone", { replace: true });
         return;
       }
@@ -148,42 +188,41 @@ export default function LoginPage() {
     navigate(from ?? "/dashboard", { replace: true });
   };
 
+  /**
+   * 切段：清所有错误（上一段的失败原因不再适用于新段），切到 Email 时强制退出 smsMode。
+   * 两段各自的已输入值保留 —— 用户来回对照不该丢输入。
+   */
+  const switchMethod = (next: LoginMethod) => {
+    if (next === activeMethod) {
+      return;
+    }
+    setMethod(next);
+    setErrors({});
+    setFormError(null);
+    setPhoneSignInFailed(false);
+    setSmsError(null);
+    setSmsCodeError(null);
+    if (next === "email") {
+      setSmsMode(false);
+    }
+  };
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setFormError(null);
     setPhoneSignInFailed(false);
-    const parsed = loginFormSchema.safeParse({ identifier, password });
-    if (!parsed.success) {
-      const next: Partial<Record<keyof LoginForm, string>> = {};
-      for (const issue of parsed.error.issues) {
-        const key = issue.path[0] as keyof LoginForm;
-        if (key !== undefined && next[key] === undefined) {
-          next[key] = issue.message;
-        }
+
+    if (activeMethod === "email") {
+      const parsed = emailFormSchema.safeParse({ email, password });
+      if (!parsed.success) {
+        setErrors(collectFieldErrors(parsed.error.issues));
+        return;
       }
-      setErrors(next);
-      return;
-    }
-    const value = parsed.data.identifier.trim();
-    const isEmail = value.includes("@");
-    if (!isEmail && smsStatus === "off") {
-      setErrors({ identifier: PHONE_DISABLED });
-      return;
-    }
-    // 手机号 = 静态 `+86` + 本地 11 位（PRD R20：用户不手输国家码，也没有下拉）。
-    // 仍经 toNationalDigits 清洗：允许用户把完整号码粘贴进同一个输入框。
-    const phoneNumber = isEmail ? null : composePhoneNumber(toNationalDigits(value));
-    if (!isEmail && phoneNumber === null) {
-      // 客户端拦截，不发请求（design §7.2）
-      setErrors({ identifier: INVALID_IDENTIFIER });
-      return;
-    }
-    setErrors({});
-    setIsSubmitting(true);
-    try {
-      if (isEmail) {
+      setErrors({});
+      setIsSubmitting(true);
+      try {
         const { error } = await authClient.signIn.email({
-          email: value,
+          email: parsed.data.email.trim(),
           password: parsed.data.password,
         });
         if (error) {
@@ -191,22 +230,38 @@ export default function LoginPage() {
           setFormError(error.message ?? "Sign in failed");
           return;
         }
-      } else {
-        if (phoneNumber === null) {
-          setErrors({ identifier: INVALID_IDENTIFIER });
-          return;
-        }
-        const { error } = await authClient.signIn.phoneNumber({
-          phoneNumber,
-          password: parsed.data.password,
-        });
-        if (error) {
-          // 号码/密码登录失败**不区分原因**（未注册 / 无密码 / 密码错）—— 服务端本就不区分，
-          // 前端不能靠文案把这份克制还回去（design §8）
-          setFormError(phoneAuthErrorMessage(error as SmsErrorLike));
-          setPhoneSignInFailed(true);
-          return;
-        }
+        await goAfterSignIn();
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
+    const parsed = phoneFormSchema.safeParse({ phoneDigits, password });
+    if (!parsed.success) {
+      setErrors(collectFieldErrors(parsed.error.issues));
+      return;
+    }
+    // 手机号 = 静态 `+86` + 本地 11 位（PRD R20：用户不手输国家码，也没有真正的下拉）
+    const phoneNumber = composePhoneNumber(parsed.data.phoneDigits);
+    if (phoneNumber === null) {
+      // 客户端拦截，不发请求（design §7.2）
+      setErrors({ phone: INVALID_PHONE_MESSAGE });
+      return;
+    }
+    setErrors({});
+    setIsSubmitting(true);
+    try {
+      const { error } = await authClient.signIn.phoneNumber({
+        phoneNumber,
+        password: parsed.data.password,
+      });
+      if (error) {
+        // 号码/密码登录失败**不区分原因**（未注册 / 无密码 / 密码错）—— 服务端本就不区分，
+        // 前端不能靠文案把这份克制还回去（design §8）
+        setFormError(phoneAuthErrorMessage(error as SmsErrorLike));
+        setPhoneSignInFailed(true);
+        return;
       }
       await goAfterSignIn();
     } finally {
@@ -235,19 +290,11 @@ export default function LoginPage() {
     setSmsCodeError(null);
   };
 
-  /** 从共用标识框解析出规范形号码；不是手机号形态则返回 null（不再有第二个号码框）。 */
-  const identifierPhoneNumber = (): string | null => {
-    if (identifier.includes("@")) {
-      return null;
-    }
-    return composePhoneNumber(toNationalDigits(identifier));
-  };
-
   const handleSendCode = async () => {
     setSmsError(null);
-    const phoneNumber = identifierPhoneNumber();
+    const phoneNumber = composePhoneNumber(phoneDigits);
     if (phoneNumber === null) {
-      setErrors({ identifier: INVALID_PHONE_MESSAGE });
+      setErrors({ phone: INVALID_PHONE_MESSAGE });
       return;
     }
     setErrors({});
@@ -257,9 +304,9 @@ export default function LoginPage() {
   const handleVerify = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSmsError(null);
-    const phoneNumber = identifierPhoneNumber();
+    const phoneNumber = composePhoneNumber(phoneDigits);
     if (phoneNumber === null) {
-      setErrors({ identifier: INVALID_PHONE_MESSAGE });
+      setErrors({ phone: INVALID_PHONE_MESSAGE });
       return;
     }
     const code = smsCode.trim();
@@ -285,9 +332,9 @@ export default function LoginPage() {
     }
   };
 
-  // 两种模式的表单级错误落在同一个位置。模式切换时各自清空（openSmsMode / closeSmsMode），
-  // 因此这里同一时刻只会有一个来源。
-  const pageError = smsMode ? (smsError ?? smsSender.error) : formError;
+  // 密码（两段共用）与验证码两种模式的表单级错误落在同一个位置。
+  // 模式/段切换时各自清空（openSmsMode / closeSmsMode / switchMethod），同一时刻只会有一个来源。
+  const pageError = smsView ? (smsError ?? smsSender.error) : formError;
 
   return (
     <AuthCard
@@ -309,7 +356,7 @@ export default function LoginPage() {
         </p>
       ) : null}
       {/* 失败原因的替代路径：不解释「为什么失败」，只指出下一步（design §8） */}
-      {phoneSignInFailed && smsStatus === "on" && !smsMode ? (
+      {phoneSignInFailed && smsStatus === "on" && !smsView ? (
         <p className="mb-4 text-xs text-muted-foreground">
           Haven&apos;t set a password?{" "}
           <button
@@ -323,43 +370,81 @@ export default function LoginPage() {
         </p>
       ) : null}
 
-      <form onSubmit={smsMode ? handleVerify : handleSubmit} className="space-y-4" noValidate>
-        {/* 全页唯一的标识输入框（PRD R21）：密码登录与验证码登录共用，切换模式不换字段 */}
-        <div className="space-y-2">
-          {/* 验证码视图里标识只能是手机号（邮箱分支不存在），标签随之收窄；
-              密码视图两态并存，保留 Email or phone number */}
-          <Label htmlFor="login-identifier">
-            {smsMode ? "Phone number (China Only)" : "Email or phone number"}
-          </Label>
-          <Input
-            id="login-identifier"
-            // 刻意不是 type="email"：浏览器会拦掉手机号（design §7.2）
-            type="text"
-            autoComplete="username"
-            // 邮箱地址上限（RFC 5321 的 254）；手机号在验证码视图另有 11 位清洗
-            maxLength={254}
-            value={identifier}
-            onChange={(e) => {
-              // 验证码视图只收手机号（邮箱分支不存在）：就地清洗成 ≤11 位数字，
-              // 字母/超长不再留到提交才报错；密码视图同一个框收邮箱，不能清洗。
-              const next = smsMode ? toNationalDigits(e.target.value) : e.target.value;
-              if (e.target.value !== next) {
-                e.target.value = next;
-              }
-              setIdentifier(next);
-              // 改标识即清掉它的内联错误；验证码属于上一个标识，一并作废（码是发给旧号码的）
-              setErrors((prev) => ({ ...prev, identifier: undefined }));
-              setSmsCodeError(null);
-              if (smsMode) {
-                setSmsCode("");
-              }
-            }}
-            aria-invalid={errors.identifier !== undefined}
-          />
-          {errors.identifier ? <p className="text-xs text-destructive">{errors.identifier}</p> : null}
+      <form onSubmit={smsView ? handleVerify : handleSubmit} className="space-y-4" noValidate>
+        {/* Email / Phone 分段控件（design §13.2）：aria-pressed 表达当前段；
+            smsStatus === "off" 时不渲染 Phone（插件整段 404）。 */}
+        <div role="group" aria-label="Sign-in method" className="flex gap-1 rounded-lg bg-muted p-1">
+          <button
+            type="button"
+            aria-pressed={activeMethod === "email"}
+            onClick={() => switchMethod("email")}
+            className={cn(
+              "flex-1 rounded-md px-3 py-1.5 text-sm transition-colors",
+              activeMethod === "email"
+                ? "bg-background font-medium text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            Email
+          </button>
+          {smsStatus !== "off" ? (
+            <button
+              type="button"
+              aria-pressed={activeMethod === "phone"}
+              onClick={() => switchMethod("phone")}
+              className={cn(
+                "flex-1 rounded-md px-3 py-1.5 text-sm transition-colors",
+                activeMethod === "phone"
+                  ? "bg-background font-medium text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              Phone
+            </button>
+          ) : null}
         </div>
 
-        {smsMode ? (
+        {activeMethod === "email" ? (
+          <div className="space-y-2">
+            <Label htmlFor="login-email">Email</Label>
+            <Input
+              id="login-email"
+              type="email"
+              autoComplete="email"
+              // 邮箱地址上限（RFC 5321 的 254）
+              maxLength={254}
+              value={email}
+              onChange={(event) => {
+                setEmail(event.target.value);
+                // 改标识即清掉它的内联错误
+                setErrors((prev) => ({ ...prev, email: undefined }));
+              }}
+              aria-invalid={errors.email !== undefined}
+            />
+            {errors.email ? <p className="text-xs text-destructive">{errors.email}</p> : null}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <Label htmlFor="login-phone">Phone number (China Only)</Label>
+            <PhoneNumberInput
+              id="login-phone"
+              withCountrySelector
+              autoComplete="tel-national"
+              value={phoneDigits}
+              onValueChange={(next) => {
+                setPhoneDigits(next);
+                setErrors((prev) => ({ ...prev, phone: undefined }));
+                // 验证码属于上一个号码，改号即作废（码是发给旧号码的）
+                setSmsCodeError(null);
+                setSmsCode("");
+              }}
+              aria-invalid={errors.phone !== undefined}
+            />
+            {errors.phone ? <p className="text-xs text-destructive">{errors.phone}</p> : null}
+          </div>
+        )}
+
+        {smsView ? (
           <>
             {/* 发码按钮与验证码输入框同一行（输入框占满剩余宽度）；提示行不再出现 ——
                 按钮标签本身（Resend in Ns）已表达发送结果 */}
@@ -421,16 +506,24 @@ export default function LoginPage() {
           </>
         )}
 
-        {/* 模式切换与找回入口固定在提交按钮下方：两种模式同一位置、同一文字链接样式 */}
+        {/* 模式切换（仅 Phone 段有第二种方式）与找回入口固定在提交按钮下方：
+            同一位置、同一文字链接样式。Forgot password 走短信验证码，故仍受开关门控。 */}
         {smsStatus === "on" ? (
-          <div className="flex items-center justify-between text-sm">
-            <button
-              type="button"
-              className="font-medium text-primary hover:underline"
-              onClick={smsMode ? closeSmsMode : openSmsMode}
-            >
-              {smsMode ? "Sign in with password" : "Sign in with SMS code"}
-            </button>
+          <div
+            className={cn(
+              "flex items-center text-sm",
+              activeMethod === "phone" ? "justify-between" : "justify-end",
+            )}
+          >
+            {activeMethod === "phone" ? (
+              <button
+                type="button"
+                className="font-medium text-primary hover:underline"
+                onClick={smsView ? closeSmsMode : openSmsMode}
+              >
+                {smsView ? "Sign in with password" : "Sign in with SMS code"}
+              </button>
+            ) : null}
             <Link to="/forgot-password" className="text-muted-foreground hover:text-foreground hover:underline">
               Forgot password?
             </Link>

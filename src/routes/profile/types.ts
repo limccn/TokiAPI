@@ -46,6 +46,14 @@ export const profileSchema = z.object({
    */
   smsAuthEnabled: z.boolean(),
   /**
+   * 手机硬门禁是否对该账号放行（11-08 R8 / D7）。判据 = SMS 开关开启 且 邮箱已验证 且
+   * isAdminEmail(ADMIN_EMAILS, email) —— 与 src/middleware/auth.ts 的后门分支同一判据。
+   * 未验证邮箱不享受后门（`changeEmail` 可把未验证地址立即写库，不能作为管理员自证依据）。
+   * SPA 的 AppLayout / 登录页用 `phoneNumberVerified || phoneGateBypassed` 决定是否送
+   * /bind-phone；不得在前端另写名单解析（app/lib/phone-gate.ts 是唯一判据入口）。
+   */
+  phoneGateBypassed: z.boolean(),
+  /**
    * 是否已绑定 GitHub 账号（11-06-sms-alicloud-auth，PRD R16 / design §13.3）。
    * 判据：accounts 表存在 providerId='github' 且 userId=本人的行（OAuth 建号与
    * 「已登录用户 link-social 绑定」两条路径都会落这一行）。

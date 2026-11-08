@@ -17,6 +17,7 @@ import { useSession } from "@/hooks/use-session";
 import { useApiConfig } from "@/hooks/use-api-config";
 import { useProfile } from "@/modules/profile/hooks/use-profile";
 import { authClient } from "@/lib/auth-client";
+import { needsPhoneBinding } from "@/lib/phone-gate";
 import { queryClient } from "@/lib/query-client";
 import { cn } from "@/lib/utils";
 import { PageLoading } from "@/components/ui/states";
@@ -90,10 +91,12 @@ export function AppLayout() {
 
   // 未验手机 → 独立绑定页（不套管理台布局）。查询在途时先等，避免先渲染出
   // 一堆注定 403 的页面；查询失败则放行 —— 服务端门禁仍是最终防线。
+  // 判据走 app/lib/phone-gate.ts 的 needsPhoneBinding（11-08 R8）：ADMIN_EMAILS 后门账号
+  // 由服务端在 profile.phoneGateBypassed 里告知，前端不解析名单。
   if (smsAuthEnabled) {
     if (
       profileQuery.data !== undefined &&
-      profileQuery.data.profile.phoneNumberVerified !== true
+      needsPhoneBinding(profileQuery.data.profile)
     ) {
       return <Navigate to="/bind-phone" replace />;
     }
