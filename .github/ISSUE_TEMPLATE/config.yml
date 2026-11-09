@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security report
+    url: https://github.com/limccn/TokiAPI/security/advisories/new
+    about: Please report security vulnerabilities privately, not in a public issue.
+  - name: Hosted instance
+    url: https://tokiapi.app
+    about: Try the hosted instance (an invite is required).

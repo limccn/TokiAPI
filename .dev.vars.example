@@ -50,6 +50,9 @@ BETTER_AUTH_URL=http://localhost:5173
 # EMAIL_ACCOUNT_ADMIN_PROMOTION_ENABLED=false
 # 事务邮件收件人白名单（逗号分隔；空 = 全放行 —— 仅 EMAIL_VERIFICATION_ENABLED=true 时相关）
 # EMAIL_ALLOWED_RECIPIENTS=
+# 事务邮件发件地址（可选；空 = 内置 notify@tokiapi.app，仅托管实例拥有该域）
+# 自部署时填自己 Resend 已验证域名下的地址，例如 notify@mail.example.com
+# EMAIL_FROM=notify@mail.example.com
 # request_logs 明细保留天数（cron 清理用；缺省 30）
 # REQUEST_LOG_RETENTION_DAYS=30
 # 短信认证总开关（11-06-sms-alicloud-auth；缺省 false = phone-number 插件不注册：端点 404、UI 消失）
