@@ -146,9 +146,10 @@ export default function DocsPage() {
                 everything.
               </p>
               <p>
-                It runs entirely on Cloudflare (Workers, D1, KV, Queues). There is no external
-                service to operate, and your data — keys, balances, request logs — stays in your
-                own account.
+                It runs entirely on Cloudflare (Workers, D1, KV, Queues). Email verification and
+                SMS sign-in are optional integrations with Resend and Alibaba Cloud; leave them
+                unconfigured and the gateway runs without them. Your data — keys, balances, request
+                logs — stays in your own account.
               </p>
             </DocSection>
 

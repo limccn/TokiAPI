@@ -23,7 +23,14 @@ declare namespace Cloudflare {
     API_DOMAIN?: string;
     GITHUB_CLIENT_ID: string;
     GITHUB_CLIENT_SECRET: string;
-    GITHUB_ALLOWED_EMAILS: string;
+    /**
+     * 管理员邮箱名单（11-06-sms-alicloud-auth；语义 = 自动提权名单）。
+     * vitest.config.ts pin ""（部署缺省 = 无人自动提权）；tests/admin-emails.test.ts 用
+     * helpers.withAdminEmails 在运行时翻成非空名单来覆盖提权路径。
+     * 声明为必填 string，与 src/env.d.ts 及 wrangler types 生成的声明一致 ——
+     * 三处可选性不一致会表现为「运行时能跑、typecheck 报错」。
+     */
+    ADMIN_EMAILS: string;
     /** request_logs 保留天数（M5 5.4；缺省 30，未注入时按默认处理）。 */
     REQUEST_LOG_RETENTION_DAYS?: string;
     /** 网关 API Key 明文前缀（缺省 "sk-"；空白视为未设置，回退默认）。 */
@@ -47,6 +54,33 @@ declare namespace Cloudflare {
     RESEND_API_KEY?: string;
     /** 事务邮件收件人白名单（同上）。pin "" = 全放行，与 prod 缺省形态一致。 */
     EMAIL_ALLOWED_RECIPIENTS?: string;
+    /** 事务邮件发件地址覆盖（11-09）。未 pin：缺省回落内置地址，用例以字面 env 对象直调。 */
+    EMAIL_FROM?: string;
+    /**
+     * GitHub 绑定赠金金额（11-08-reward-semantics-overhaul）。vitest.config.ts pin "5"；
+     * tests/settings.test.ts 用 helpers.withSwitch 翻成 "0" 断言端点读的是 env ——
+     * 未被 pin 的键无法保证可写，故此处必须声明（漏声明的症状是「运行时能跑、typecheck 报错」）。
+     * 另外两个赠金金额键不在此列：测试只以字面 env 对象直调包装，不经 cloudflare:test 的 env 读。
+     */
+    GITHUB_BIND_BONUS_AMOUNT?: string;
+    /**
+     * 短信认证（11-06-sms-alicloud-auth）。vitest.config.ts 全部 pin 成**部署缺省**（开关 "false"、
+     * 其余空串）—— 开关态由 helpers.withSwitch 在运行时翻转。漏声明会「运行时能跑、typecheck 报错」
+     * （本文件是 Cloudflare.Env 的平行声明，src/env.d.ts 管不到 cloudflare:test 的 env）。
+     */
+    SMS_AUTH_ENABLED?: string;
+    SMS_ALLOWED_PHONES?: string;
+    SMS_SIGN_NAME?: string;
+    SMS_TEMPLATE_CODE?: string;
+    SMS_TEMPLATE_CODE_RESET?: string;
+    SMS_TEMPLATE_PARAM?: string;
+    /**
+     * 阿里云 AccessKey。**必须 pin ""**：测试进程会加载仓库根的 `.dev.vars`
+     * （基线跑批输出 19 行 `Using secrets defined in .dev.vars`），而开发者本地的该文件里
+     * 可能有**真实** AK —— 不 pin 的话任何 stub 不到 fetch 的用例都会打到真实短信通道。
+     */
+    SMS_ACCESS_KEY_ID?: string;
+    SMS_ACCESS_KEY_SECRET?: string;
     /**
      * 延迟计费队列名（09-21-prod-resource-naming）。**双重身份** token：既是 queues 绑定的队列名
      * （绑定本身由 worker-configuration.d.ts 生成 BILLING_QUEUE），又是 queue() 的运行期分流谓词。

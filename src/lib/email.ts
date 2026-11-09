@@ -44,6 +44,8 @@ export interface SendMailInput {
 export interface MailEnv {
   RESEND_API_KEY?: string;
   EMAIL_ALLOWED_RECIPIENTS?: string;
+  /** 发件地址覆盖（可选）：空/缺失回落 {@link EMAIL_FROM}（托管实例的内置地址）。 */
+  EMAIL_FROM?: string;
 }
 
 /**
@@ -81,6 +83,10 @@ export async function sendMail(
     return;
   }
 
+  // 自部署者用自己的 Resend key 发信时，发件地址必须落在其已验证域名下；
+  // 空白覆盖值按「未设置」处理，回落内置地址，保证现有部署行为不变。
+  const sender = env.EMAIL_FROM?.trim() || EMAIL_FROM;
+
   let response: Response;
   try {
     response = await fetch(RESEND_ENDPOINT, {
@@ -90,7 +96,7 @@ export async function sendMail(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from: `${EMAIL_FROM_NAME} <${EMAIL_FROM}>`,
+        from: `${EMAIL_FROM_NAME} <${sender}>`,
         // Resend 规范形态：单收件人也用数组
         to: [input.to],
         subject: input.subject,

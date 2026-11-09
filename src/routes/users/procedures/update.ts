@@ -18,7 +18,7 @@ import {
   shouldBlockAdminPromotion,
   type PromotionRole,
 } from "../../../lib/admin-promotion-policy";
-import { hasEmailCredential } from "../lib/email-credential";
+import { hasEmailCredential, hasGithubAccount } from "../lib/email-credential";
 import { updateUserInputSchema, userIdParamSchema } from "../types";
 import { toUserResponse } from "../lib/convert";
 
@@ -60,6 +60,8 @@ export function updateUserRoute(app: Hono<AppEnv>): void {
       const currentRole: PromotionRole =
         existing.role === "admin" ? "admin" : "member";
       const targetEmailRegistered = await hasEmailCredential(db, existing.id);
+      // GitHub 绑定事实（11-08 R10）：响应体与列表契约同字段，一次查询
+      const targetGithubLinked = await hasGithubAccount(db, existing.id);
       if (
         shouldBlockAdminPromotion({
           promotionEnabled: isEmailAccountAdminPromotionEnabled(
@@ -102,7 +104,7 @@ export function updateUserRoute(app: Hono<AppEnv>): void {
       });
       return c.json({
         success: true as const,
-        user: toUserResponse(updated, targetEmailRegistered),
+        user: toUserResponse(updated, targetEmailRegistered, targetGithubLinked),
       });
     },
   );

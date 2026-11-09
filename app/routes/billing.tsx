@@ -44,8 +44,13 @@ const adjustFormSchema = z.object({
 type TypeFilter = "all" | BalanceTxType;
 
 function typeBadgeVariant(type: BalanceTxType): "success" | "secondary" | "destructive" {
-  // 进账（充值 / 注册赠金 / 验证赠金）与扣费（usage）分色；adjust 可正可负 → 中性
-  if (type === "recharge" || type === "signup_bonus" || type === "email_verify_bonus") {
+  // 进账（充值 / 三档绑定赠金）与扣费（usage）分色；adjust 可正可负 → 中性
+  if (
+    type === "recharge" ||
+    type === "signup_bonus" ||
+    type === "email_verify_bonus" ||
+    type === "github_bind_bonus"
+  ) {
     return "success";
   }
   if (type === "usage") {
@@ -161,7 +166,7 @@ export default function BillingPage() {
               <span className="font-medium">{formatNumber(total)}</span>
             </div>
             {/* 类型筛选（批次 I）：原是本卡的一行静态罗列
-                「Types | recharge / usage / adjust / signup_bonus / email_verify_bonus」，
+                「Types | recharge / usage / adjust / signup_bonus / email_verify_bonus / github_bind_bonus」，
                 现改为承接流水表原先那个下拉 —— 该卡因此从「只读摘要」变成**可操作的筛选器**，
                 选中的类型即时作用于下方流水表（即选即查，与 usage 页同一范式）。
                 批次 L（2026-09-21）由竖排改回**一行**：标签从 "Transaction type" 缩成 "Type" 后
@@ -183,7 +188,8 @@ export default function BillingPage() {
                 <option value="usage">Usage</option>
                 <option value="adjust">Adjustment</option>
                 <option value="signup_bonus">Signup bonus</option>
-                <option value="email_verify_bonus">Email verified bonus</option>
+                <option value="email_verify_bonus">Email bound bonus</option>
+                <option value="github_bind_bonus">GitHub linked bonus</option>
               </Select>
             </div>
           </CardContent>

@@ -17,7 +17,9 @@
 //   ③ **不倒查存量**：currentRole 已是 admin 的幂等 no-op 不拦，否则开关一关，
 //      存量的邮箱制 admin 连「重复写一次角色字段」都会失败；
 //   ④ **缺省即关闭**（fail-closed）：未配置 / 空 / 非法值一律 false —— 与
-//      GITHUB_ALLOWED_EMAILS 空表即拒绝登录同一取向。
+//      EMAIL_VERIFICATION_ENABLED 等策略开关同一取向。
+//      （11-06-sms-alicloud-auth 起 ADMIN_EMAILS 的语义是**自动提权名单** —— 那是部署方
+//      亲授的通道，不受本开关约束；本开关只拦人工提升动作。）
 //
 // 判据「邮件注册的账户」不在这里：它要查库（accounts 表 provider_id='credential' 行），
 // 见 src/routes/users/lib/email-credential.ts。本文件只收一个**已判定好的布尔**，因此可被前后端共用。

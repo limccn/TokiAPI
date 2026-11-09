@@ -5,9 +5,9 @@
 // 升为账户菜单的**并列项**后，「打开哪个弹窗」由菜单项直接决定，改密不再要经过 Profile；
 // 副作用是 Profile 弹窗显著变矮（原本 642px 高，矮视口下上下各溢 21px 的元凶之一）。
 //
-// 判据（hasPassword）**不在本组件里**：入口的**可点击性**由 user-button.tsx 的
-// ChangePasswordMenuItem 门控（09-21 起该项恒常驻、未就绪/无凭据时置灰，不再是「可见/不可见」；
-// 唯一真源仍是 GET /api/me/profile，见那里的说明）；
+// 判据（hasPassword）**不在本组件里**：入口由 user-button.tsx 的 PasswordMenuItem 门控
+// （09-21 起该项恒常驻、查询未就绪/失败时置灰；11-06 起 `hasPassword === false` 打开的是
+// 并列的 SetPasswordDialog，本弹窗只服务「已有密码」的账号；唯一真源仍是 GET /api/me/profile）；
 // 本组件只在被打开时渲染表单 —— 判据只有一个消费方，就不会出现两处各自推导而漂移。
 //
 // 表单**零改动**：change-password-form.tsx 的逻辑、错误码映射、成功文案一字未动（R5）。

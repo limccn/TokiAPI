@@ -14,7 +14,18 @@ export type UserStatus = "active" | "disabled";
 // Better Auth getSession 的返回类型（user 携带 additionalFields：role/status/balance）
 type SessionResult = Awaited<ReturnType<AuthInstance["api"]["getSession"]>>;
 export type AuthSession = NonNullable<SessionResult>["session"];
-export type SessionUser = NonNullable<SessionResult>["user"];
+/**
+ * 会话用户。额外并入 phone-number 插件的字段（11-06-sms-alicloud-auth）：
+ * 插件由 SMS_AUTH_ENABLED 门控**条件注册**，auth.ts 的 plugins 是「有插件 / 无插件」的联合类型，
+ * 直接取 `NonNullable<SessionResult>["user"]` 得到的是联合，`phoneNumberVerified` 不在公共成员上。
+ * 运行时语义与此一致：开关开启时该字段随会话下发（插件 schema 并入 user 表），
+ * 关闭时**结构性缺席** —— 故声明为可选，调用方（phone 门禁）必须先判开关再读它。
+ */
+export type SessionUser = NonNullable<SessionResult>["user"] & {
+  // 插件 schema 把该字段声明为「可空且可选」（库侧 parseUserOutput 对缺失值给 null），
+  // 与 drizzle 列 NOT NULL 的严格性不同 —— 以库侧类型为准，门禁用 `=== true` 判定即可。
+  phoneNumberVerified?: boolean | null;
+};
 
 /** 代理面鉴权上下文（由 gatewayAuth 中间件注入 /v1/* 请求）。 */
 export type GatewayAuthContext = {

@@ -14,7 +14,10 @@ import {
 } from "lucide-react";
 import { Navigate, NavLink, Outlet, useLocation } from "react-router";
 import { useSession } from "@/hooks/use-session";
+import { useApiConfig } from "@/hooks/use-api-config";
+import { useProfile } from "@/modules/profile/hooks/use-profile";
 import { authClient } from "@/lib/auth-client";
+import { needsPhoneBinding } from "@/lib/phone-gate";
 import { queryClient } from "@/lib/query-client";
 import { cn } from "@/lib/utils";
 import { PageLoading } from "@/components/ui/states";
@@ -45,6 +48,14 @@ const NAV_ITEMS: NavItem[] = [
 export function AppLayout() {
   const { isMounted, isPending, user } = useSession();
   const location = useLocation();
+  const config = useApiConfig();
+
+  // 手机号硬门禁的前端拦截（11-06-sms-alicloud-auth，PRD R19 / AC30）。
+  // 判据只取 GET /api/me/profile（不受门禁影响、allowlist 内）—— 不从 session 推导：
+  // SessionUser 不含 phoneNumberVerified，硬塞一个前端类型字段会造成「两处各有一个答案」。
+  // 开关关闭时该查询不发起，门禁整体不存在（AC38）。
+  const smsAuthEnabled = config.data?.smsAuthEnabled === true;
+  const profileQuery = useProfile({ enabled: user !== null && smsAuthEnabled });
 
   if (!isMounted || isPending) {
     return (
@@ -76,6 +87,26 @@ export function AppLayout() {
         </Button>
       </div>
     );
+  }
+
+  // 未验手机 → 独立绑定页（不套管理台布局）。查询在途时先等，避免先渲染出
+  // 一堆注定 403 的页面；查询失败则放行 —— 服务端门禁仍是最终防线。
+  // 判据走 app/lib/phone-gate.ts 的 needsPhoneBinding（11-08 R8）：ADMIN_EMAILS 后门账号
+  // 由服务端在 profile.phoneGateBypassed 里告知，前端不解析名单。
+  if (smsAuthEnabled) {
+    if (
+      profileQuery.data !== undefined &&
+      needsPhoneBinding(profileQuery.data.profile)
+    ) {
+      return <Navigate to="/bind-phone" replace />;
+    }
+    if (profileQuery.isPending) {
+      return (
+        <div className="min-h-screen">
+          <PageLoading />
+        </div>
+      );
+    }
   }
 
   const visibleItems = NAV_ITEMS.filter((item) => !item.adminOnly || user.role === "admin");

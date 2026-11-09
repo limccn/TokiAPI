@@ -2,8 +2,8 @@
 // userId 取自会话（/me 路径天然 self；admin 也看自己的资料）。
 //
 // 数据取**服务端最新值**（单表主键查询），不从 session 透传：session 可能因 staleTime 滞后，
-// 且 SessionUser 不含 emailVerified 与开关。返回值只暴露这五个字段 —— role/balance/status
-// 等应用自有字段不下发（本端点无此需求，少暴露一分是一分）。
+// 且 SessionUser 不含 emailVerified 与开关。返回值只暴露 profile 契约里的字段 ——
+// role/balance/status 等应用自有字段不下发（本端点无此需求，少暴露一分是一分）。
 //
 // 为什么下发 hasPassword（09-17-change-password）：它是前端「改密码区块是否渲染」的**唯一**判据。
 // 前端拿不到 accounts 表，也不该从 session 推导 —— 判据若在两处实现必然漂移，而漂移的两种方向
@@ -16,6 +16,8 @@ import type { AppEnv } from "../../../types";
 import { createDb } from "../../../db";
 import { accounts, users } from "../../../db/schema";
 import { isEmailVerificationEnabled } from "../../../lib/bonus";
+import { isSmsAuthEnabled, maskPhone } from "../../../lib/phone";
+import { isAdminEmail } from "../../../lib/admin-emails";
 import type { ProfileOutput } from "../types";
 
 export function getProfileRoute(app: Hono<AppEnv>): void {
@@ -30,7 +32,13 @@ export function getProfileRoute(app: Hono<AppEnv>): void {
 
     const user = await db.query.users.findFirst({
       where: eq(users.id, userId),
-      columns: { name: true, email: true, emailVerified: true },
+      columns: {
+        name: true,
+        email: true,
+        emailVerified: true,
+        phoneNumber: true,
+        phoneNumberVerified: true,
+      },
     });
     if (!user) {
       // 会话有效但用户行已消失（理论不可达）：显式 404 而非返回空壳资料
@@ -42,6 +50,16 @@ export function getProfileRoute(app: Hono<AppEnv>): void {
     const emailVerificationEnabled = isEmailVerificationEnabled(
       c.env.EMAIL_VERIFICATION_ENABLED,
     );
+    // 同上：开关解析只有一个真源（src/lib/phone.ts），本文件不得自写字符串比较
+    const smsAuthEnabled = isSmsAuthEnabled(c.env.SMS_AUTH_ENABLED);
+    // 门禁后门（11-08 R8 / D7）：与 src/middleware/auth.ts 的放行分支同一判据、同一函数。
+    // 只有开关开启时后端门禁才存在，故前置 smsAuthEnabled（关闭时该字段恒 false，
+    // 前端 `phoneNumberVerified || phoneGateBypassed` 也不会因此产生行为差异）。
+    // emailVerified 是安全边界：未验证邮箱可经 changeEmail 立即自写，不能作为管理员自证依据。
+    const phoneGateBypassed =
+      smsAuthEnabled &&
+      user.emailVerified === true &&
+      isAdminEmail(c.env.ADMIN_EMAILS, user.email);
 
     // 凭据账号存在性 —— 刻意**不判 issuer**（design §3.1 / prd D7）。
     // 库的 findCredentialAccount 还匹配 issuer=createLocalAccountIssuer('credential') 与
@@ -59,13 +77,28 @@ export function getProfileRoute(app: Hono<AppEnv>): void {
     });
     const hasPassword = Boolean(credential?.password);
 
+    // GitHub 绑定状态（11-06-sms-alicloud-auth，PRD R16 / design §13.3）：OAuth 建号与
+    // 已登录用户的 link-social 都会在 accounts 落 providerId='github' 的行，故存在性即绑定状态。
+    // 只查存在性、只下发布尔 —— accountId / token 不属 profile 契约。
+    const githubAccount = await db.query.accounts.findFirst({
+      where: and(eq(accounts.userId, userId), eq(accounts.providerId, "github")),
+      columns: { id: true },
+    });
+    const githubLinked = githubAccount !== undefined;
+
     logger.info("me_profile_reported", {
       userId,
       emailVerified: user.emailVerified,
       emailVerificationEnabled,
+      smsAuthEnabled,
+      // 号码只记打码形态（本人数据，但日志不需要明文；与 sms.ts 同一函数）
+      phone: user.phoneNumber === null ? null : maskPhone(user.phoneNumber),
+      phoneNumberVerified: user.phoneNumberVerified,
+      phoneGateBypassed,
       // 布尔值本身不敏感（不泄露哈希/凭据内容），但线上排障需要它来判断「用户看不到入口」
       // 是判据错了还是账户形态确实如此
       hasPassword,
+      githubLinked,
     });
 
     const output: ProfileOutput = {
@@ -76,6 +109,11 @@ export function getProfileRoute(app: Hono<AppEnv>): void {
         emailVerified: user.emailVerified,
         emailVerificationEnabled,
         hasPassword,
+        phoneNumber: user.phoneNumber,
+        phoneNumberVerified: user.phoneNumberVerified,
+        smsAuthEnabled,
+        phoneGateBypassed,
+        githubLinked,
       },
     };
     return c.json(output);

@@ -2,7 +2,7 @@
 // ⚠ 测试侧**无 `@/` 别名**（vitest.config 无 resolve.alias，tsconfig.test 的 paths 继承不到）——
 //   一律相对导入（批次 Q 教训）。
 import { describe, expect, it } from "vitest";
-import { buildInviteLink, normalizeInviteCode } from "../app/lib/invite-link";
+import { buildInviteLink, normalizeInviteCode, toInviteCode } from "../app/lib/invite-link";
 
 describe("normalizeInviteCode（与服务端 validateInviteCode 同口径）", () => {
   it("trim + 大写", () => {
@@ -17,6 +17,24 @@ describe("normalizeInviteCode（与服务端 validateInviteCode 同口径）", (
 
   it("已是归一形态则恒等（预填不改动正确输入）", () => {
     expect(normalizeInviteCode("ABC123DEFG")).toBe("ABC123DEFG");
+  });
+});
+
+describe("toInviteCode（邀请码输入框清洗：字母数字、≤10 位）", () => {
+  it("去掉空格/连字符等非字母数字（粘贴带分隔符的码）", () => {
+    expect(toInviteCode("ab cd-efgh ijklm")).toBe("abcdefghij");
+  });
+
+  it("截到 10 位（generateInviteCode 缺省长度）", () => {
+    expect(toInviteCode("ABCDEFGHJKMNP")).toBe("ABCDEFGHJK");
+  });
+
+  it("大小写不归一（归一仍是 normalizeInviteCode 的职责，输入态不改写用户键入）", () => {
+    expect(toInviteCode("AbC123Defg")).toBe("AbC123Defg");
+  });
+
+  it("已是合法码则恒等", () => {
+    expect(toInviteCode("ABC123DEFG")).toBe("ABC123DEFG");
   });
 });
 

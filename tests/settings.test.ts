@@ -23,6 +23,7 @@ interface SettingsBody {
     requestLogRetentionDays: number;
     signupBonusAmount: number;
     emailVerifyBonusAmount: number;
+    githubBindBonusAmount: number;
     emailVerificationEnabled: boolean;
     emailAccountAdminPromotionEnabled: boolean;
   };
@@ -55,9 +56,11 @@ describe("GET /api/admin/settings", () => {
     expect(body.settings.cacheTtlSeconds).toBe(3600); // api_keys.cache_ttl schema 默认
     expect(body.settings.rateLimitWindowSeconds).toBe(60); // rate-limit.ts WINDOW_SECONDS
     expect(body.settings.requestLogRetentionDays).toBe(30); // cleanup.ts 默认（测试 env 无覆盖）
-    // 赠金三项（09-16-signup-bonus-grant AC11）：金额为解析后的生效值，开关为布尔
+    // 赠金四项（09-16-signup-bonus-grant AC11；11-08-reward-semantics-overhaul 增 GitHub 绑定档）：
+    // 金额为解析后的生效值，开关为布尔
     expect(body.settings.signupBonusAmount).toBe(5); // bonus.ts 默认（测试 env 无覆盖）
     expect(body.settings.emailVerifyBonusAmount).toBe(5);
+    expect(body.settings.githubBindBonusAmount).toBe(5);
     expect(body.settings.emailVerificationEnabled).toBe(true); // 测试绑定显式开启（vitest.config.ts）
     // 账户安全总开关（09-21-email-admin-promotion-switch）：测试绑定显式 pin 成部署缺省（关闭）
     expect(body.settings.emailAccountAdminPromotionEnabled).toBe(false);
@@ -88,5 +91,28 @@ describe("GET /api/admin/settings", () => {
     });
     const afterBody = (await after.json()) as SettingsBody;
     expect(afterBody.settings.emailAccountAdminPromotionEnabled).toBe(false);
+  });
+
+  it("赠金金额随 env 翻转（GITHUB_BIND_BONUS_AMOUNT=0 = 关闭；还原后回 5）", async () => {
+    // 与上一条同形：只断言 0 不够（pin 值 5 与本例目标值不等，写死也会红，但还原后回 5
+    // 才证明端点读的是 env 而不是某条缓存/常量）。
+    const adminId = await setupUser("settings-admin-bonus@test.dev", 0, "admin");
+    const cookie = sessionCookie(await createSession(adminId));
+
+    const reported = await withSwitch("GITHUB_BIND_BONUS_AMOUNT", "0", async () => {
+      const res = await selfFetch("http://localhost/api/admin/settings", {
+        headers: { Cookie: cookie },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as SettingsBody;
+      return body.settings.githubBindBonusAmount;
+    });
+    expect(reported).toBe(0);
+
+    const after = await selfFetch("http://localhost/api/admin/settings", {
+      headers: { Cookie: cookie },
+    });
+    const afterBody = (await after.json()) as SettingsBody;
+    expect(afterBody.settings.githubBindBonusAmount).toBe(5);
   });
 });

@@ -32,6 +32,34 @@ export const profileSchema = z.object({
    * 182 kB 顶到 255 kB）。前端一律直取零依赖的 src/lib/password.ts。
    */
   hasPassword: z.boolean(),
+  /**
+   * 规范形手机号（`+861…`），未绑定为 null（11-06-sms-alicloud-auth）。
+   * 只向**本人**下发完整号码 —— 本端点的 userId 恒取自会话（/me 路径），不接参数。
+   */
+  phoneNumber: z.string().nullable(),
+  /** 号码是否已验证（插件写入；本轮只有 verify 链路会置 true）。 */
+  phoneNumberVerified: z.boolean(),
+  /**
+   * 短信认证总开关（SMS_AUTH_ENABLED 经 isSmsAuthEnabled 解析的生效值）。
+   * 与 emailVerificationEnabled 同一口径：开关关闭时 phone-number 插件整段不注册，
+   * 前端不能靠「调一下看看」发现，必须读这个字段。
+   */
+  smsAuthEnabled: z.boolean(),
+  /**
+   * 手机硬门禁是否对该账号放行（11-08 R8 / D7）。判据 = SMS 开关开启 且 邮箱已验证 且
+   * isAdminEmail(ADMIN_EMAILS, email) —— 与 src/middleware/auth.ts 的后门分支同一判据。
+   * 未验证邮箱不享受后门（`changeEmail` 可把未验证地址立即写库，不能作为管理员自证依据）。
+   * SPA 的 AppLayout / 登录页用 `phoneNumberVerified || phoneGateBypassed` 决定是否送
+   * /bind-phone；不得在前端另写名单解析（app/lib/phone-gate.ts 是唯一判据入口）。
+   */
+  phoneGateBypassed: z.boolean(),
+  /**
+   * 是否已绑定 GitHub 账号（11-06-sms-alicloud-auth，PRD R16 / design §13.3）。
+   * 判据：accounts 表存在 providerId='github' 且 userId=本人的行（OAuth 建号与
+   * 「已登录用户 link-social 绑定」两条路径都会落这一行）。
+   * 资料页据此显示「已绑定 / 可绑定」；不暴露 GitHub 侧的 id 或 token。
+   */
+  githubLinked: z.boolean(),
 });
 
 export const profileOutputSchema = z.object({

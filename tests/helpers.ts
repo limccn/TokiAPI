@@ -98,7 +98,19 @@ export async function withSwitch<T>(
     | "EMAIL_VERIFICATION_ENABLED"
     | "RESEND_API_KEY"
     | "EMAIL_ALLOWED_RECIPIENTS"
-    | "API_DOMAIN",
+    | "API_DOMAIN"
+    // 11-06-sms-alicloud-auth：开关 + 白名单 + 两个约束键 + 模板映射 + AK 对，
+    // 全部在 vitest.config.ts pin 过（未被 pin 的键无法保证可写）。
+    | "SMS_AUTH_ENABLED"
+    | "SMS_ALLOWED_PHONES"
+    | "SMS_SIGN_NAME"
+    | "SMS_TEMPLATE_CODE"
+    | "SMS_TEMPLATE_CODE_RESET"
+    | "SMS_TEMPLATE_PARAM"
+    | "SMS_ACCESS_KEY_ID"
+    | "SMS_ACCESS_KEY_SECRET"
+    // 11-08-reward-semantics-overhaul：GitHub 绑定赠金金额（settings.test.ts 翻成 0 验 env 生效）。
+    | "GITHUB_BIND_BONUS_AMOUNT",
   value: string | undefined,
   fn: () => Promise<T>,
 ): Promise<T> {
@@ -466,4 +478,23 @@ export async function createSession(userId: number): Promise<string> {
 /** 组装 Better Auth 会话 Cookie 头值。 */
 export function sessionCookie(cookieValue: string): string {
   return `better-auth.session_token=${cookieValue}`;
+}
+
+/**
+ * 逐用例改写管理员邮箱名单（11-06-sms-alicloud-auth）。
+ *
+ * 为什么不并进 withSwitch：`ADMIN_EMAILS` 在 Env 里是**必填 string**（与 wrangler types 生成的
+ * __BaseEnv_Env 一致；写成可选会与生成声明冲突），塞进同一个联合类型会让
+ * `env[key] = value`（value 可为 undefined）的类型检查失败 —— 与 withBetterAuthUrl 同一处境。
+ *
+ * 纪律与 withSwitch 相同：只在本 isolate 内可见、try/finally 还原（同文件用例共享 env）。
+ */
+export async function withAdminEmails<T>(raw: string, fn: () => Promise<T>): Promise<T> {
+  const original = env.ADMIN_EMAILS;
+  try {
+    env.ADMIN_EMAILS = raw;
+    return await fn();
+  } finally {
+    env.ADMIN_EMAILS = original;
+  }
 }

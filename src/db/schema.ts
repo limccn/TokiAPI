@@ -43,15 +43,36 @@ export const users = sqliteTable(
       .default(false),
     image: text("image"),
     githubId: text("github_id").unique(),
+    // 手机号（11-06-sms-alicloud-auth）：**规范形** `+86` + 11 位（见 src/lib/phone.ts）。
+    // 唯一 —— 一个号码只能挂一个账号（邮箱/手机号账号可各自独立存在，但号码不可重复）。
+    // NULL = 未绑定；短信注册时由插件写入并置 verified。
+    phoneNumber: text("phone_number").unique(),
+    // 号码是否经短信验证码验证过（插件在 verify 建号/绑定时写 true）。
+    // notNull + default(false)：存量行自动为 false，无需回填。
+    phoneNumberVerified: integer("phone_number_verified", { mode: "boolean" })
+      .notNull()
+      .default(false),
     // 赠金幂等标记（09-16-signup-bonus-grant）：NULL = 该档未发放；非 NULL = 已发放时间。
     // 均为 nullable 无默认值（迁移只增不改）；条件 UPDATE 的 WHERE 依据，
     // 并发两次触发只有一次能命中（配合 balance_tx_bonus_once_idx 部分唯一索引双保险）。
+    // 三档语义（11-08-reward-semantics-overhaul）：signup = 手机验证（注册/绑定）、
+    // email_verify = 邮箱绑定并验证、github_bind = 注册后绑定 GitHub（见 src/lib/bonus.ts）。
     signupBonusGrantedAt: integer("signup_bonus_granted_at", {
       mode: "timestamp",
     }),
     emailVerifyBonusGrantedAt: integer("email_verify_bonus_granted_at", {
       mode: "timestamp",
     }),
+    githubBindBonusGrantedAt: integer("github_bind_bonus_granted_at", {
+      mode: "timestamp",
+    }),
+    // 赠金资格（11-08-reward-semantics-overhaul）：true = 可参与三档赠金发放。
+    // 迁移在 ADD COLUMN 后立刻把当时已存在的行回填为 false（存量账号永久冻结）；
+    // 新行按 DEFAULT true 具备资格。运行时**只读**，没有任何写路径 —— 见 src/lib/bonus.ts 的资格预读
+    //（D5：资格判据不进 db.batch，否则会把「钱没加」与「流水已写」拆开，制造孤儿流水）。
+    bonusEligible: integer("bonus_eligible", { mode: "boolean" })
+      .notNull()
+      .default(true),
     // 首次登录欢迎弹窗标记（09-16-signup-bonus-onboarding C2 使用；本任务只建列，不写不改）
     welcomeSeenAt: integer("welcome_seen_at", { mode: "timestamp" }),
     ...timestamps,
@@ -256,8 +277,9 @@ export const providers = sqliteTable(
 
 // --- 余额流水 ---
 // amount 带符号（充值 + / 扣费 -）；
-// type: 'recharge' | 'usage' | 'adjust' | 'signup_bonus' | 'email_verify_bonus'
-// （后两者为赠送赠金，2026-09-16 起；zod 是取值真源：src/routes/billing/types.ts）。
+// type: 'recharge' | 'usage' | 'adjust' | 'signup_bonus' | 'email_verify_bonus' | 'github_bind_bonus'
+// （后三者为赠送赠金，2026-09-16 起（前两档）/ 2026-11-08 增 GitHub 绑定档；
+//  zod 是取值真源：src/routes/billing/types.ts）。
 export const balanceTx = sqliteTable(
   "balance_tx",
   {
@@ -279,13 +301,14 @@ export const balanceTx = sqliteTable(
     index("balance_tx_user_id_idx").on(table.userId),
     index("balance_tx_created_at_idx").on(table.createdAt),
     // 赠金幂等兜底（09-16-signup-bonus-grant）：同一用户每档赠金至多一行流水。
-    // 部分唯一索引只覆盖两个赠金 type（usage 单请求多行、adjust/recharge 不受影响）；
-    // 与 users.signup_bonus_granted_at / email_verify_bonus_granted_at 标记列双保险：
+    // 部分唯一索引只覆盖三个赠金 type（usage 单请求多行、adjust/recharge 不受影响）；
+    // 与 users.signup_bonus_granted_at / email_verify_bonus_granted_at /
+    // github_bind_bonus_granted_at 标记列双保险：
     // 标记列挡住重复加钱，本索引挡住「标记被清空后重复写流水」。
     uniqueIndex("balance_tx_bonus_once_idx")
       .on(table.userId, table.type)
       .where(
-        sql`${table.type} IN ('signup_bonus', 'email_verify_bonus')`,
+        sql`${table.type} IN ('signup_bonus', 'email_verify_bonus', 'github_bind_bonus')`,
       ),
   ],
 );

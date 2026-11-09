@@ -71,8 +71,10 @@ function firstOf(arr: unknown): Record<string, unknown> {
 
 const cfg = parseJsonc(jsoncRaw);
 
-/** [vars] 白名单（15 键，design §2；与 wrangler.jsonc 逐键相等，多键少键都红）。 */
+/** [vars] 白名单（23 键，design §2；与 wrangler.jsonc 逐键相等，多键少键都红）。 */
 const VARS_WHITELIST = [
+  // 11-06-sms-alicloud-auth：语义 = 自动提权名单
+  "ADMIN_EMAILS",
   "API_DOMAIN",
   "API_KEY_PREFIX",
   "BETTER_AUTH_URL",
@@ -80,14 +82,25 @@ const VARS_WHITELIST = [
   "CACHE_ENABLED",
   "EMAIL_ACCOUNT_ADMIN_PROMOTION_ENABLED",
   "EMAIL_ALLOWED_RECIPIENTS",
+  // 11-09-readme-open-source-rewrite：自部署者发件地址覆盖（空 = 内置托管地址）
+  "EMAIL_FROM",
   "EMAIL_VERIFICATION_ENABLED",
   "EMAIL_VERIFY_BONUS_AMOUNT",
-  "GITHUB_ALLOWED_EMAILS",
+  // 11-08-reward-semantics-overhaul：GitHub 绑定赠金金额（三档赠金的第三档）
+  "GITHUB_BIND_BONUS_AMOUNT",
   "GITHUB_CLIENT_ID",
   "MODELCAP_BASE_TOKENS",
   "MODELCAP_MULTIPLIER",
   "REQUEST_LOG_RETENTION_DAYS",
   "SIGNUP_BONUS_AMOUNT",
+  // 短信认证（11-06-sms-alicloud-auth）：两个约束键（签名/模板）由部署方补齐，
+  // 故缺省留空；模板变量映射的缺省值是**可用形态**（变量名待阶段 13 与控制台核对）。
+  "SMS_ALLOWED_PHONES",
+  "SMS_AUTH_ENABLED",
+  "SMS_SIGN_NAME",
+  "SMS_TEMPLATE_CODE",
+  "SMS_TEMPLATE_CODE_RESET",
+  "SMS_TEMPLATE_PARAM",
 ];
 
 /** 真实 secret 键名 —— 任何部署配置文件都不允许出现（值更不允许；红线自查）。 */
@@ -96,6 +109,9 @@ const SECRET_KEY_NAMES = [
   "GITHUB_CLIENT_SECRET",
   "GATEWAY_SECRET_KEY",
   "RESEND_API_KEY",
+  // 11-06-sms-alicloud-auth：阿里云 AK 对（`wrangler secret put` / .dev.vars 专用）
+  "SMS_ACCESS_KEY_ID",
+  "SMS_ACCESS_KEY_SECRET",
 ];
 
 const vars = cfg.vars as Record<string, string>;
@@ -131,7 +147,7 @@ describe("wrangler.jsonc（按钮形态）结构契约", () => {
     expect(triggers.crons).toContain("0 2 * * *");
   });
 
-  it("[vars] 键集合 == 15 键白名单（多键少键都红 —— 渲染管线的键契约断言在此续命）", () => {
+  it("[vars] 键集合 == 23 键白名单（多键少键都红 —— 渲染管线的键契约断言在此续命）", () => {
     expect(Object.keys(vars).sort()).toEqual(VARS_WHITELIST);
   });
 
@@ -172,14 +188,16 @@ describe("wrangler.jsonc（按钮形态）结构契约", () => {
 });
 
 describe("wrangler.jsonc 安全缺省（fail-closed）", () => {
-  it("GITHUB_ALLOWED_EMAILS 空 = 拒绝所有 GitHub 登录", () => {
-    expect(vars.GITHUB_ALLOWED_EMAILS).toBe("");
+  it("ADMIN_EMAILS 空 = 无人自动提权（不锁死：手工 D1 UPDATE 仍可 bootstrap）", () => {
+    expect(vars.ADMIN_EMAILS).toBe("");
   });
 
-  it("功能开关缺省关闭（CACHE / EMAIL_VERIFICATION / ADMIN_PROMOTION）", () => {
+  it("功能开关缺省关闭（CACHE / EMAIL_VERIFICATION / ADMIN_PROMOTION / SMS_AUTH）", () => {
     expect(vars.CACHE_ENABLED).toBe("false");
     expect(vars.EMAIL_VERIFICATION_ENABLED).toBe("false");
     expect(vars.EMAIL_ACCOUNT_ADMIN_PROMOTION_ENABLED).toBe("false");
+    // 11-06-sms-alicloud-auth：缺省关闭 = phone-number 插件不注册（端点 404、UI 消失）
+    expect(vars.SMS_AUTH_ENABLED).toBe("false");
   });
 
   it("不含任何 lmlh.net 域名（按钮克隆形态与维护者域名零耦合）", () => {

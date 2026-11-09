@@ -33,6 +33,12 @@ export const router = createBrowserRouter([
   // 认证页（public；已登录时内部重定向到 /dashboard）
   { path: "/login", element: lazyPage(() => import("@/routes/login")) },
   { path: "/register", element: lazyPage(() => import("@/routes/register")) },
+  // 短信找回密码（11-06-sms-alicloud-auth）：登录页的 Forgot password? 入口仅在开关开启时出现，
+  // 但路由本身无条件注册 —— 直接输 URL 的已登录用户由页面内部重定向接管。
+  { path: "/forgot-password", element: lazyPage(() => import("@/routes/forgot-password")) },
+  // 强制绑定手机（11-06-sms-alicloud-auth，PRD R19 / design §13.8）：独立页，**不套 AppLayout**。
+  // 已登录但未验手机的用户由登录成功回调 / AppLayout 守卫送到这里。
+  { path: "/bind-phone", element: lazyPage(() => import("@/routes/bind-phone")) },
 
   // 受保护布局：认证守卫 + 侧边导航
   {

@@ -23,6 +23,7 @@ import {
   selfFetch,
   sessionCookie,
   setupUser,
+  withSwitch,
 } from "./helpers";
 
 // Better Auth 校验 Origin 与 baseURL 一致（vitest env: BETTER_AUTH_URL=http://localhost:5173）
@@ -36,6 +37,11 @@ interface ProfileBody {
     emailVerified: boolean;
     emailVerificationEnabled: boolean;
     hasPassword: boolean;
+    phoneNumber: string | null;
+    phoneNumberVerified: boolean;
+    smsAuthEnabled: boolean;
+    githubLinked: boolean;
+    phoneGateBypassed: boolean;
   };
 }
 
@@ -149,20 +155,28 @@ describe("GET /api/me/profile（账号资料，只读）", () => {
     expect(body).toBeNull();
   });
 
-  it("登录后 → 200，五字段形状与类型正确；开关随 env 生效（测试绑定为开启）", async () => {
+  it("登录后 → 200，十字段形状与类型正确；开关随 env 生效（测试绑定为开启）", async () => {
     const userId = await setupUser("pf-basic@test.dev", 0);
     const { status, body } = await getProfile(await cookieFor(userId));
 
     expect(status).toBe(200);
     expect(body?.success).toBe(true);
-    // 响应形状契约（design §2.1）：顶层 success + profile 五字段，无多余字段（不泄露 role/balance）
+    // 响应形状契约（design §2.1）：顶层 success + profile 字段，无多余字段（不泄露 role/balance）
     expect(Object.keys(body ?? {}).sort()).toEqual(["profile", "success"]);
     expect(Object.keys(body?.profile ?? {}).sort()).toEqual([
       "email",
       "emailVerificationEnabled",
       "emailVerified",
+      // 11-06-sms-alicloud-auth：GitHub 绑定状态（design §13.3）
+      "githubLinked",
       "hasPassword",
       "name",
+      // 11-08-reward-semantics-overhaul R8：门禁后门可见性（SMS 开启 + 命中 ADMIN_EMAILS）
+      // 前端 needsPhoneBinding 据此放行，不靠 SPA 侧私留名单副本
+      "phoneGateBypassed",
+      "phoneNumber",
+      "phoneNumberVerified",
+      "smsAuthEnabled",
     ]);
     expect(body?.profile).toEqual({
       name: "pf-basic",
@@ -174,6 +188,37 @@ describe("GET /api/me/profile（账号资料，只读）", () => {
       emailVerificationEnabled: true,
       // setupUser 只插 users 行、不插 accounts 行 → 无凭据账号。恰好是「无 account 行」这一分支
       hasPassword: false,
+      // 未绑定手机号（11-06）：NULL 而不是空串 —— 前端据 null 判断「未绑定」
+      phoneNumber: null,
+      phoneNumberVerified: false,
+      // vitest pin SMS_AUTH_ENABLED="false"（fail-closed 缺省）；真分支见下方 withSwitch 用例
+      smsAuthEnabled: false,
+      // setupUser 不插 accounts 行 ⇒ 没有 GitHub 绑定（正例见下方 'github' 账号用例）
+      githubLinked: false,
+      // SMS 关闭 ⇒ 门禁整体不存在，后门字段恒 false（不是「被跳过」）；三态见
+      // tests/phone-binding-gate.test.ts 的 AC15 用例
+      phoneGateBypassed: false,
+    });
+  });
+
+  it("手机号字段：绑定后向本人下发规范形号码 + 已验证标记；smsAuthEnabled 随开关翻转", async () => {
+    const userId = await setupUser("pf-phone@test.dev", 0);
+    const db = createDb(env);
+    await db
+      .update(users)
+      .set({ phoneNumber: "+8613800138021", phoneNumberVerified: true })
+      .where(eq(users.id, userId));
+
+    // 缺省（pin "false"）：号码照下发（资料归属本人，与开关无关），但开关为 false
+    const off = (await getProfile(await cookieFor(userId))).body;
+    expect(off?.profile.phoneNumber).toBe("+8613800138021");
+    expect(off?.profile.phoneNumberVerified).toBe(true);
+    expect(off?.profile.smsAuthEnabled).toBe(false);
+
+    // 开启后：同一账号的开关字段翻 true（解析唯一真源 isSmsAuthEnabled）
+    await withSwitch("SMS_AUTH_ENABLED", "true", async () => {
+      const on = (await getProfile(await cookieFor(userId))).body;
+      expect(on?.profile.smsAuthEnabled).toBe(true);
     });
   });
 
@@ -197,6 +242,8 @@ describe("GET /api/me/profile（账号资料，只读）", () => {
     });
     const { body } = await getProfile(await cookieFor(userId));
     expect(body?.profile.hasPassword).toBe(false);
+    // 同一行的存在性也是 githubLinked 的正例（11-06）：providerId='github' 即「已绑定」
+    expect(body?.profile.githubLinked).toBe(true);
   });
 
   it("hasPassword：判据含 password 非空 —— providerId='credential' 但无密码 → false", async () => {
@@ -259,9 +306,11 @@ describe("GET /api/me/profile（账号资料，只读）", () => {
 });
 
 // 改 name 复用 Better Auth 内置 POST /api/auth/update-user（design §2.2，本模块不自建写端点）。
-// 下方三条是**安全护栏**：邮箱不可改（R5/AC6）与 role/balance 不可由客户端写入（AC6c）都不是
-// 我们写的校验，而是库内部机制 —— 正因为不是自己写的，才必须用测试钉住，防止未来配置漂移
-// （如误加 changeEmail / 误把 role 改成 input:true）时无人察觉。
+// 下方三条是**安全护栏**：邮箱不可经 update-user 修改（R5/AC6）与 role/balance 不可由客户端
+// 写入（AC6c）都不是我们写的校验，而是库内部机制 —— 正因为不是自己写的，才必须用测试钉住，
+// 防止未来配置漂移（如误把 role 改成 input:true）时无人察觉。
+// 注：11-06 起**邮箱绑定**走库的独立端点 POST /api/auth/change-email（user.changeEmail，
+// 见 src/lib/auth.ts），与 update-user 的「email 不可改」互不影响 —— 两条路径由库分开实现。
 describe("POST /api/auth/update-user（name 写入 + 权限边界）", () => {
   it("AC6b：只带 name → 200 落库，且新值可被 /api/me/profile 读到", async () => {
     const userId = await setupUser("pf-upd-name@test.dev", 0);

@@ -96,10 +96,10 @@
     "crons": ["0 2 * * *"]
   },
 
-  // --- 非敏感运行时配置（15 键，安全缺省）---
+  // --- 非敏感运行时配置（23 键，安全缺省）---
   // 治理规则：四个真实 secret（名单见 .dev.vars.example 与 README 部署章节）**绝不进本文件**，
   // 只走 `.dev.vars`（一键部署 setup 页输入项通道）或
-  // `wrangler secret put`。个性化值（BETTER_AUTH_URL / GITHUB_CLIENT_ID / GITHUB_ALLOWED_EMAILS）
+  // `wrangler secret put`。个性化值（BETTER_AUTH_URL / GITHUB_CLIENT_ID / ADMIN_EMAILS）
   // 双通道：本文件缺省 + `.dev.vars.example`（setup 页输入）；一键部署输入值的落盘形态是文档盲区，
   // 部署后按 README「部署后收尾清单」用 Dashboard / `wrangler secret put` 兜底核对。
   "vars": {
@@ -109,8 +109,10 @@
     "BETTER_AUTH_URL": "http://localhost:5173",
     // GitHub OAuth App Client ID（非秘密）。占位 = GitHub 登录不可用直至配置（README 收尾清单）。
     "GITHUB_CLIENT_ID": "replace-me-github-client-id",
-    // GitHub 登录白名单邮箱（逗号分隔）。**空 = 拒绝所有 GitHub 登录**（fail-closed）。
-    "GITHUB_ALLOWED_EMAILS": "",
+    // 管理员邮箱名单（逗号分隔；11-06-sms-alicloud-auth）。
+    // 语义是**自动提权**而非登录准入：名单内邮箱的账号在注册与每次登录时成为 admin（只升不降），
+    // GitHub 登录本身不再受名单限制。**空 = 无人自动提权**（不锁死：手工 D1 UPDATE 仍可 bootstrap）。
+    "ADMIN_EMAILS": "",
     // request_logs 明细保留天数（cron 清理用）
     "REQUEST_LOG_RETENTION_DAYS": "30",
     // 网关 API Key 明文前缀（仅影响新生成 Key）
@@ -123,18 +125,54 @@
     // （src/generated/modelcaps.ts 存档位；缺省 8192 × 2 = 16384 基准；改动后需重跑 render:modelcaps + 部署）
     "MODELCAP_BASE_TOKENS": "8192",
     "MODELCAP_MULTIPLIER": "2",
-    // 注册赠金 / 邮箱验证赠金金额（USD，09-16-signup-bonus-grant）：缺省 5（开箱即送）；
-    // 显式设 0（或非法值）即不赠（涉及钱，非法配置 fail-safe 到少发）
+    // 三档赠金金额（USD，11-08-reward-semantics-overhaul 起语义与绑定动作一一对应）：
+    //   SIGNUP_BONUS_AMOUNT       = 手机验证赠金（手机号注册 / 绑定手机）
+    //   EMAIL_VERIFY_BONUS_AMOUNT = 邮箱绑定赠金（绑定并验证邮箱）
+    //   GITHUB_BIND_BONUS_AMOUNT  = GitHub 绑定赠金（注册后绑定 GitHub，OAuth 直接注册不发）
+    // 缺省 5（开箱即送）；显式设 0（或非法值）即不赠（涉及钱，非法配置 fail-safe 到少发）。
+    // ⚠ 存量账号在本改造前即被冻结（迁移把 users.bonus_eligible 回填 false），三档一律不发。
     "SIGNUP_BONUS_AMOUNT": "5",
     "EMAIL_VERIFY_BONUS_AMOUNT": "5",
-    // 邮箱验证功能总开关：缺省 false = 系统休眠（不发验证信、不发验证赠金）
+    "GITHUB_BIND_BONUS_AMOUNT": "5",
+    // 邮箱验证功能总开关：缺省 false = 系统休眠（不发验证信、不发邮箱绑定赠金）
     "EMAIL_VERIFICATION_ENABLED": "false",
     // 账户安全总开关（09-21-email-admin-promotion-switch）：缺省/false = 邮件注册的账户不能提升为 admin
     "EMAIL_ACCOUNT_ADMIN_PROMOTION_ENABLED": "false",
     // 事务邮件收件人白名单（08-27-email-notification；逗号分隔）：**空 = 全放行**
     "EMAIL_ALLOWED_RECIPIENTS": "",
+    // 事务邮件发件地址（11-09-readme-open-source-rewrite）：**空 = 内置 notify@tokiapi.app**
+    // （仅托管实例拥有该域）。自部署者必须填自己 Resend 已验证域名下的地址，否则 Resend 拒发。
+    "EMAIL_FROM": "",
     // 公开 API 域名（双域名分流）：**空 = 分流整体关闭** = 单一 workers.dev 域的正确形态。
     // 自定义双域名的部署方在部署后填写（并同时于 dashboard 绑定该域名）。
-    "API_DOMAIN": ""
+    "API_DOMAIN": "",
+
+    // ---- 短信认证（11-06-sms-alicloud-auth；阿里云「短信认证」dypnsapi）----
+    // 总开关：缺省 false = phone-number 插件**整段不注册**（端点 404、UI 入口消失），
+    // 与 EMAIL_VERIFICATION_ENABLED 同一形态（开关关闭 = 结构性不存在，不是「配置了但内部 no-op」）。
+    "SMS_AUTH_ENABLED": "false",
+    // 短信测试号码白名单（逗号分隔，`+86` 规范形或裸 11 位）：**空 = 全放行**
+    // （语义对齐 EMAIL_ALLOWED_RECIPIENTS；非空但全无效 = 全拒，fail-closed）。
+    "SMS_ALLOWED_PHONES": "",
+    // 短信签名名 与 模板 CODE —— 由部署方从阿里云「短信认证」控制台**补齐**。
+    // 空 = **配置错误**：sendSmsCode 记 sms_config_invalid 后**抛错**，不静默跳过
+    // （静默只留给「开关关 / AK 缺失 / 白名单外」三态，免得「码永远发不出、端点却一直成功」）。
+    // 🔴 没有可用的只读查询端点：赠送资源不出现在短信服务的签名/模板列表里
+    // （实测两者 TotalCount 均为 0 而发送成功，见任务 research R14），只能人工抄写。
+    "SMS_SIGN_NAME": "",
+    // 模板 CODE 有**五个系统赠送模板**（控制台「赠送模板配置」页，2026-11-06 调研）：
+    //   100001 登录/注册/通用 · 100002 修改绑定号码 · 100003 重置密码
+    //   100004 绑定新号码 · 100005 验证已绑定号码
+    // 五者只差文案（变量同为 ${code}/${min}、频控一致），故换模板不需要改 SMS_TEMPLATE_PARAM。
+    // 本键是**登录/注册/绑定**共用的主模板（缺省建议 100001）。
+    "SMS_TEMPLATE_CODE": "",
+    // 找回密码专用模板（可选，缺省建议 100003）：**空 = 回落 SMS_TEMPLATE_CODE**。
+    // 只拆这一条岔路的原因：库的 sendOTP 把登录/注册/绑定合成一个回调（服务端分不清绑定），
+    // 而 sendPasswordResetOTP 是独立回调，可以分。
+    "SMS_TEMPLATE_CODE_RESET": "",
+    // 模板变量映射（JSON）：值中的 ##code## 被替换为本次验证码。
+    // **变量名以控制台实际模板为准**（赠送模板为 `${code}` / `${min}`）——
+    // 变量名不符时改这个 vars，不改代码。缺 ##code## 或 JSON 非法 → 发送失败并记配置错误。
+    "SMS_TEMPLATE_PARAM": "{\"code\":\"##code##\",\"min\":\"5\"}"
   }
 }

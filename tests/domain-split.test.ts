@@ -398,6 +398,8 @@ describe("R-B14/B15 GET /api/config 运行期下发", () => {
       expect(await res.json()).toEqual({
         apiBaseUrl: "https://api.lmlh.net",
         platformBaseUrl: "https://platform.lmlh.net",
+        // 11-06-sms-alicloud-auth：同样运行期下发；vitest pin SMS_AUTH_ENABLED="false"
+        smsAuthEnabled: false,
       });
     });
   });
@@ -408,6 +410,7 @@ describe("R-B14/B15 GET /api/config 运行期下发", () => {
       expect(await res.json()).toEqual({
         apiBaseUrl: "https://stg-api.lmlh.net",
         platformBaseUrl: "https://stg-platform.lmlh.net",
+        smsAuthEnabled: false,
       });
     });
   });
@@ -418,6 +421,7 @@ describe("R-B14/B15 GET /api/config 运行期下发", () => {
       expect(await res.json()).toEqual({
         apiBaseUrl: "http://localhost:5173",
         platformBaseUrl: "http://localhost:5173",
+        smsAuthEnabled: false,
       });
     });
   });
@@ -434,6 +438,7 @@ describe("R-B14/B15 GET /api/config 运行期下发", () => {
       expect(await res.json()).toEqual({
         apiBaseUrl: "http://localhost:5173",
         platformBaseUrl: "http://localhost:5173",
+        smsAuthEnabled: false,
       });
     });
   });
@@ -453,6 +458,7 @@ describe("R-B14/B15 GET /api/config 运行期下发", () => {
       expect(await onLoopback.json()).toEqual({
         apiBaseUrl: "http://localhost:5173", // 环回例外：本地能被服务的地址
         platformBaseUrl: "https://platform.lmlh.net", // 无例外：BETTER_AUTH_URL 的 origin
+        smsAuthEnabled: false,
       });
 
       const onPlatform = await fetchManual("https://platform.lmlh.net/api/config");
@@ -460,6 +466,7 @@ describe("R-B14/B15 GET /api/config 运行期下发", () => {
       expect(await onPlatform.json()).toEqual({
         apiBaseUrl: "https://api.lmlh.net",
         platformBaseUrl: "https://platform.lmlh.net",
+        smsAuthEnabled: false,
       });
     });
   });
