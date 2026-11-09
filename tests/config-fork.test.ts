@@ -71,7 +71,7 @@ function firstOf(arr: unknown): Record<string, unknown> {
 
 const cfg = parseJsonc(jsoncRaw);
 
-/** [vars] 白名单（22 键，design §2；与 wrangler.jsonc 逐键相等，多键少键都红）。 */
+/** [vars] 白名单（23 键，design §2；与 wrangler.jsonc 逐键相等，多键少键都红）。 */
 const VARS_WHITELIST = [
   // 11-06-sms-alicloud-auth：语义 = 自动提权名单
   "ADMIN_EMAILS",
@@ -82,6 +82,8 @@ const VARS_WHITELIST = [
   "CACHE_ENABLED",
   "EMAIL_ACCOUNT_ADMIN_PROMOTION_ENABLED",
   "EMAIL_ALLOWED_RECIPIENTS",
+  // 11-09-readme-open-source-rewrite：自部署者发件地址覆盖（空 = 内置托管地址）
+  "EMAIL_FROM",
   "EMAIL_VERIFICATION_ENABLED",
   "EMAIL_VERIFY_BONUS_AMOUNT",
   // 11-08-reward-semantics-overhaul：GitHub 绑定赠金金额（三档赠金的第三档）
@@ -145,7 +147,7 @@ describe("wrangler.jsonc（按钮形态）结构契约", () => {
     expect(triggers.crons).toContain("0 2 * * *");
   });
 
-  it("[vars] 键集合 == 22 键白名单（多键少键都红 —— 渲染管线的键契约断言在此续命）", () => {
+  it("[vars] 键集合 == 23 键白名单（多键少键都红 —— 渲染管线的键契约断言在此续命）", () => {
     expect(Object.keys(vars).sort()).toEqual(VARS_WHITELIST);
   });
 

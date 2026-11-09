@@ -17,6 +17,8 @@ dist/*
 
 # 维护者生产部署 fork（真实域名 routes + 真实资源 id + 个性化 vars；含真实 PII，不入库）
 wrangler.prod.jsonc
+# 维护者 staging/临时环境 fork（同属个性化部署配置，不随仓库分发）
+wrangler.stg.jsonc
 
 # UI 审计产物（脚本入库，会话/截图本地留存）
 scripts/ui-audit/

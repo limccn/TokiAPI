@@ -19,7 +19,7 @@ OpenAI 兼容的 **AI API 网关**：单入口代理多家模型供应商（Open
 | Validation | Zod（`zod` v4 + `@hono/zod-validator`） |
 | Frontend | React 19、React Router v7、Vite、Tailwind CSS v4、shadcn-style UI、React Query |
 | Quality | TypeScript strict、ESLint（flat config）、Vitest + Miniflare、drizzle-kit migrations |
-- 线上实例：生产 `https://tokiapi.app`（公开 API `https://api.tokiapi.app`）由维护者 fork（`wrangler.prod.jsonc`，gitignored）部署；旧域 `platform.lmlh.net` / `api.lmlh.net` 保留绑定为**跳转别名**（域分流自动 301/308，2026-11-03 域名迁移）。**staging 环境已退役**（退役 runbook 见本地 `governance/stg-retirement.md`）。
+- 线上实例：生产 `https://tokiapi.app`（公开 API `https://api.tokiapi.app`）由维护者 fork（`wrangler.prod.jsonc`，gitignored）部署；历史旧域保留绑定为**跳转别名**（域分流自动 301/308，2026-11-03 域名迁移；具体域名见本地 governance spec）。**staging 环境已退役**（退役 runbook 见本地 `governance/stg-retirement.md`）。
 
 ## 部署配置（jsonc 双形态）
 
@@ -27,7 +27,7 @@ OpenAI 兼容的 **AI API 网关**：单入口代理多家模型供应商（Open
 
 | 形态 | 文件 | 内容 | 谁在用 |
 | --- | --- | --- | --- |
-| 提交入库 | `wrangler.jsonc` | 占位资源 id（一键部署自动供给并回写真实 id）+ `[vars]` 22 键安全缺省 + **无 routes / 无 env / 无 placement** | 本地 dev / test / CI、一键部署（Workers Builds）、手动部署的缺省 |
+| 提交入库 | `wrangler.jsonc` | 占位资源 id（一键部署自动供给并回写真实 id）+ `[vars]` 23 键安全缺省 + **无 routes / 无 env / 无 placement** | 本地 dev / test / CI、一键部署（Workers Builds）、手动部署的缺省 |
 | 维护者 fork | `wrangler.prod.jsonc`（gitignored） | 真实域名 routes（管理台域 + API 域，`custom_domain`）+ 真实 D1/KV id + 个性化 vars + placement | 仅 `npm run deploy` 自动选中 |
 
 - 选择逻辑在 `scripts/deploy.mjs`：fork 存在 → 用 fork；否则用 jsonc。**防呆语义**：维护者肌肉记忆 `npm run deploy` 误用占位 id 覆盖真实生产 worker 绑定，在结构上不可能。
@@ -99,14 +99,14 @@ git branch -d feat/<name>                          # ⑤ 删除
 > 全量键清单：本地 `.trellis/spec/governance/config-inventory.md`；各键权威注释在 `wrangler.jsonc` 与 `.dev.vars.example`（提交入库的模板）。
 
 1. **真实 secrets**（`BETTER_AUTH_SECRET` / `GATEWAY_SECRET_KEY` / `GITHUB_CLIENT_SECRET` / `RESEND_API_KEY` / `SMS_ACCESS_KEY_ID` / `SMS_ACCESS_KEY_SECRET`）→ **绝不进任何 jsonc / 文档 / 代码**。生产走 `wrangler secret put`（每环境独立；`GATEWAY_SECRET_KEY` 与 `BETTER_AUTH_SECRET` 分别随机生成、不得相同）；本地 dev 走 `.dev.vars`（gitignored，复制自 `.dev.vars.example`）；一键部署在 setup 页输入。
-2. **个性化 vars**（PII 与环境差异值 `BETTER_AUTH_URL` / `GITHUB_CLIENT_ID` / `ADMIN_EMAILS`，加策略开关 `CACHE_ENABLED` / `EMAIL_VERIFICATION_ENABLED` / `EMAIL_ACCOUNT_ADMIN_PROMOTION_ENABLED` / `SMS_AUTH_ENABLED`、三档赠金金额 `SIGNUP_BONUS_AMOUNT`（手机验证）/ `EMAIL_VERIFY_BONUS_AMOUNT`（邮箱绑定）/ `GITHUB_BIND_BONUS_AMOUNT`（注册后绑定 GitHub，11-08 新增，缺省 5、0/非法 = 不赠）与短信面 `SMS_ALLOWED_PHONES` / `SMS_SIGN_NAME` / `SMS_TEMPLATE_CODE` / `SMS_TEMPLATE_CODE_RESET` / `SMS_TEMPLATE_PARAM` 等）→ `wrangler.jsonc` `[vars]` 承载**安全缺省**（开关缺省一律关闭，白名单空 = 拒绝，fail-closed；**`ADMIN_EMAILS` 空 = 无人自动提权（登录不受限）**；**短信白名单是唯一例外，空 = 全放行**，见关键坑）；部署后按收尾清单用 Dashboard vars 或维护者 fork 覆盖；本地覆盖走 `.dev.vars`（**只影响本地 dev**）。
+2. **个性化 vars**（PII 与环境差异值 `BETTER_AUTH_URL` / `GITHUB_CLIENT_ID` / `ADMIN_EMAILS`，加策略开关 `CACHE_ENABLED` / `EMAIL_VERIFICATION_ENABLED` / `EMAIL_ACCOUNT_ADMIN_PROMOTION_ENABLED` / `SMS_AUTH_ENABLED`、发件地址 `EMAIL_FROM`（空 = 内置 `notify@tokiapi.app`；自部署须填自己 Resend 已验证域名下的地址）、三档赠金金额 `SIGNUP_BONUS_AMOUNT`（手机验证）/ `EMAIL_VERIFY_BONUS_AMOUNT`（邮箱绑定）/ `GITHUB_BIND_BONUS_AMOUNT`（注册后绑定 GitHub，11-08 新增，缺省 5、0/非法 = 不赠）与短信面 `SMS_ALLOWED_PHONES` / `SMS_SIGN_NAME` / `SMS_TEMPLATE_CODE` / `SMS_TEMPLATE_CODE_RESET` / `SMS_TEMPLATE_PARAM` 等）→ `wrangler.jsonc` `[vars]` 承载**安全缺省**（开关缺省一律关闭；`ADMIN_EMAILS` 空 = 无人自动提权（登录不受限）；**两处收件人白名单空 = 全放行**，短信非空但全非法 = 全拒 fail-closed，见关键坑）；部署后按收尾清单用 Dashboard vars 或维护者 fork 覆盖；本地覆盖走 `.dev.vars`（**只影响本地 dev**）。
 3. **基础设施资源 ID**（D1 database_id、KV id、Queue 名、worker 名、自定义域名）→ jsonc 字面量。提交形态是**占位 id**（按钮自动供给后回写真实值）；维护者把真实 id 与域名 routes 放进 `wrangler.prod.jsonc`。资源命名式 **`<worker 名>-<purpose>`**。域名是安全敏感值：提交形态**刻意零域名**（`tests/config-fork.test.ts` 断言不含维护者域名）。
 
 **关键坑（仍然成立）**：
 
 - `BETTER_AUTH_URL` 同时是双域名分流的「平台域」真源（`new URL(BETTER_AUTH_URL).hostname`，见 `src/lib/domains.ts`）。缺省 localhost 是已知错误值特征：管理面（`/api/*` 与 SPA）会被 301 到 `https://localhost/...`，`/v1` 照常——**部分可用**，部署后必须改成实际 origin。
 - GitHub OAuth 回调必须精确等于 `https://<origin>/api/auth/callback/github`（origin 与 `BETTER_AUTH_URL` 一致）；`ADMIN_EMAILS`（11-06 起）是**自动提权名单**：名单内邮箱的账号注册/登录即 admin（只升不降），**空 = 无人自动提权**；GitHub 登录本身不受名单限制（2026-11-06 起开放注册）。
-- **短信白名单语义与邮件白名单相反**：`SMS_ALLOWED_PHONES` 为空 = **全放行**（`EMAIL_ALLOWED_RECIPIENTS` 空 = 全拒）；写成全部非法值 = **全拒**（fail-closed，刻意不退化成全放行）。号码只认规范形 `+86` + `11` 位（`^\+861[3-9]\d{9}$`），落库/比对/白名单共用 `src/lib/phone.ts` 的同一判据。
+- **两处收件人白名单语义相同：空 = 全放行**（`SMS_ALLOWED_PHONES` 与 `EMAIL_ALLOWED_RECIPIENTS`），不要写成「邮件空 = 全拒」。短信名单写成全部非法值 = **全拒**（fail-closed，刻意不退化成全放行）；邮件名单无此「全非法」态（非空即可比对）。号码只认规范形 `+86` + `11` 位（`^\+861[3-9]\d{9}$`），落库/比对/白名单共用 `src/lib/phone.ts` 的同一判据。
 - `[[ratelimits]]` 的 `namespace_id` 是**账号级**命名空间：同账号同值跨 Worker 共享计数。一键部署用户各自部署到各自账号，1001/1002 无碰撞；**同账号部署多个实例时须自行错开段位**。
 - 本地 curl 验证线上可能需 `--ssl-no-revoke`（Windows schannel CRL）与自定义域名（workers.dev 域名在部分网络被 DNS 污染）。
 - cron 每日 02:00 UTC 清理 `request_logs`（保留 `REQUEST_LOG_RETENTION_DAYS`，缺省 30）。
@@ -118,7 +118,7 @@ git branch -d feat/<name>                          # ⑤ 删除
 
 - **一键部署（按钮）**：克隆仓库 → 按 `wrangler.jsonc` 自动供给 D1/KV/Queues（Free 计划即可——Queues 在 Free/Paid 均可用，Free 含 10,000 ops/天额度；2026-10-15 实证修订，此前「需 Paid」为过时断言）→ 回写资源 id → Workers Builds 从 `main` 构建发布。**迁移不自动执行**——收尾清单第 1 步手动 `npx wrangler d1 migrations apply DB --remote`。
 - **维护者生产部署**：本地生成 `wrangler.prod.jsonc`（真实 routes/id/vars；生成流程与字段表在本地 governance spec，**先加 .gitignore 再落盘**）→ `npm run deploy` 自动选中 → 探针验收。secrets 不进 fork，仍走 `wrangler secret put`。
-- **🔴 fork `[vars]` 部署前须人工核对**：实施期 fork 从本地 `.dev.vars` 生成，其中 `GITHUB_CLIENT_ID="placeholder-github-client-id"` / `ADMIN_EMAILS`（本地测试邮箱）/ `EMAIL_VERIFICATION_ENABLED="true"` 是 **dev 遗留值**（真实生产值历来自部署 shell export，从未落 `.dev.vars`）。每次用 fork 部署前核对这五键（加 `BETTER_AUTH_URL` / `EMAIL_ALLOWED_RECIPIENTS`）为真实生产值；`wrangler deploy` banner 会打印解析值（`env.X ("...")` 行），据此最终确认。
+- **🔴 fork `[vars]` 部署前须人工核对**：实施期 fork 从本地 `.dev.vars` 生成，其中 `GITHUB_CLIENT_ID="placeholder-github-client-id"` / `ADMIN_EMAILS`（本地测试邮箱）/ `EMAIL_VERIFICATION_ENABLED="true"` 是 **dev 遗留值**（真实生产值历来自部署 shell export，从未落 `.dev.vars`）。每次用 fork 部署前核对这六键（加 `BETTER_AUTH_URL` / `EMAIL_ALLOWED_RECIPIENTS` / `EMAIL_FROM`）为真实生产值；`wrangler deploy` banner 会打印解析值（`env.X ("...")` 行），据此最终确认。
 - **首个 admin**：把邮箱加进 `ADMIN_EMAILS` 后 GitHub 登录即**自动提权**（注册/登录两处钩子，只升不降；2026-11-06 起）。未命中名单时仍可手工 D1 `UPDATE users SET role='admin' WHERE email=...`（**禁止 SQL INSERT 造用户**——Better Auth 哈希/绑定会被绕过）。无用户状态不能发邀请码，故 GitHub OAuth 是 bootstrap 唯一入口（README 收尾清单）。
 - **手机号硬门禁（2026-11-06；11-08 加后门）**：`SMS_AUTH_ENABLED=true` 时，未验证手机的账号调管理面 `/api/*` 一律 `403 PHONE_BINDING_REQUIRED`（`src/middleware/auth.ts` 的 `requireVerifiedPhone`，挂在 `requireSession` 之后）；**`ADMIN_EMAILS` 名单内且会话邮箱已验证（`emailVerified=true`）的账号例外**（环境变量预设管理员的运维后门，只取会话邮箱、与登录自动提权同一份名单；空名单 = 无例外，日志 `phone_gate_bypassed` 不落邮箱）。**邮箱已验证是安全边界**：`changeEmail` 在 `updateEmailWithoutVerification: true` 下会把未验证的新地址立即写库，只比字符串等于把后门开放给全体用户；GitHub 登录的邮箱由 provider 的 verified 标志写入，不受影响。allowlist 仅 `GET /api/me/profile` 与 `POST /api/me/password`。`/api/auth/*`、`/api/health`、`/api/config`、`/api/invites/*` 在前挂载天然豁免，`/v1`、`/anthropic` 不受影响。SPA 侧由 `/bind-phone` 页承接绑定（判据 `app/lib/phone-gate.ts` 的 `needsPhoneBinding`，读 profile 的 `phoneGateBypassed`）；关开关即整体回滚。
 - **删队列前先删消费者**：`wrangler deploy` 不删旧 consumer（实测孤儿消费者会常驻）；删旧队列先 `consumer remove`，归零用 `purge`。**队列表不可改名**，改名 = 新建 + 改绑定 + 删旧，切换后旧队列在途消息永不被消费。

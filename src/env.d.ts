@@ -75,6 +75,9 @@ interface Env {
   // 事务邮件收件人白名单（同上；部署配置 [vars]）：逗号分隔、大小写不敏感；**空 = 全放行**
   // （仅在 EMAIL_VERIFICATION_ENABLED=true 时相关 —— 缺省开关关闭，整个通道休眠）。
   EMAIL_ALLOWED_RECIPIENTS?: string;
+  // 事务邮件发件地址（部署配置 [vars]，11-09 新增）：空/缺失 = 内置 notify@tokiapi.app
+  // （仅托管实例拥有该域）。自部署者须填自己 Resend 已验证域名下的地址，否则 Resend 拒发。
+  EMAIL_FROM?: string;
   // ---- 短信认证（11-06-sms-alicloud-auth）----
   // 总开关（部署配置 [vars]，缺省 false）：false 时 phone-number 插件**不注册** ⇒
   // /api/auth/phone-number/* 与 /api/auth/sign-in/phone-number 全部 404，SPA 入口同时消失。

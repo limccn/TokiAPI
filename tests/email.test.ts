@@ -230,6 +230,31 @@ describe("sendMail：成功路径（出站请求形态）", () => {
     expect(events[0]?.fields?.["id"]).toBe("resend-id-42");
   });
 
+  it("EMAIL_FROM 可覆盖发件地址（自部署者用自己的已验证域名）", async () => {
+    const calls = stubResend(() => resendAccepted());
+    const { logger } = capturingLogger();
+
+    await sendMail(
+      { RESEND_API_KEY: "re_test", EMAIL_FROM: "  notify@mail.example.com  " },
+      logger,
+      MAIL,
+    );
+
+    expect(only(calls).body["from"]).toBe(`${EMAIL_FROM_NAME} <notify@mail.example.com>`);
+  });
+
+  it("EMAIL_FROM 空白 / 缺失 → 回落内置地址（现有部署行为不变）", async () => {
+    for (const override of [undefined, "", "   "]) {
+      const calls = stubResend(() => resendAccepted());
+      const { logger } = capturingLogger();
+
+      await sendMail({ RESEND_API_KEY: "re_test", EMAIL_FROM: override }, logger, MAIL);
+
+      expect(only(calls).body["from"]).toBe(`${EMAIL_FROM_NAME} <${EMAIL_FROM}>`);
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("出站请求带 AbortSignal（超时上界不悬空），且信号有期限", async () => {
     const calls = stubResend(() => resendAccepted());
     const { logger } = capturingLogger();

@@ -54,6 +54,8 @@ declare namespace Cloudflare {
     RESEND_API_KEY?: string;
     /** 事务邮件收件人白名单（同上）。pin "" = 全放行，与 prod 缺省形态一致。 */
     EMAIL_ALLOWED_RECIPIENTS?: string;
+    /** 事务邮件发件地址覆盖（11-09）。未 pin：缺省回落内置地址，用例以字面 env 对象直调。 */
+    EMAIL_FROM?: string;
     /**
      * GitHub 绑定赠金金额（11-08-reward-semantics-overhaul）。vitest.config.ts pin "5"；
      * tests/settings.test.ts 用 helpers.withSwitch 翻成 "0" 断言端点读的是 env ——

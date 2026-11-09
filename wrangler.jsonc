@@ -96,7 +96,7 @@
     "crons": ["0 2 * * *"]
   },
 
-  // --- 非敏感运行时配置（22 键，安全缺省）---
+  // --- 非敏感运行时配置（23 键，安全缺省）---
   // 治理规则：四个真实 secret（名单见 .dev.vars.example 与 README 部署章节）**绝不进本文件**，
   // 只走 `.dev.vars`（一键部署 setup 页输入项通道）或
   // `wrangler secret put`。个性化值（BETTER_AUTH_URL / GITHUB_CLIENT_ID / ADMIN_EMAILS）
@@ -140,6 +140,9 @@
     "EMAIL_ACCOUNT_ADMIN_PROMOTION_ENABLED": "false",
     // 事务邮件收件人白名单（08-27-email-notification；逗号分隔）：**空 = 全放行**
     "EMAIL_ALLOWED_RECIPIENTS": "",
+    // 事务邮件发件地址（11-09-readme-open-source-rewrite）：**空 = 内置 notify@tokiapi.app**
+    // （仅托管实例拥有该域）。自部署者必须填自己 Resend 已验证域名下的地址，否则 Resend 拒发。
+    "EMAIL_FROM": "",
     // 公开 API 域名（双域名分流）：**空 = 分流整体关闭** = 单一 workers.dev 域的正确形态。
     // 自定义双域名的部署方在部署后填写（并同时于 dashboard 绑定该域名）。
     "API_DOMAIN": "",

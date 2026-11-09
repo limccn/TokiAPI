@@ -1,0 +1,60 @@
+name: Invite request
+description: Request an invite to the hosted TokiAPI instance at tokiapi.app
+title: "[Invite] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for your interest in TokiAPI.
+
+        The hosted instance at **https://tokiapi.app** is invite-based and intended for
+        evaluation. There is no SLA and capacity is limited. Please do not include phone
+        numbers, passwords, API keys or any other secrets in this issue.
+
+  - type: textarea
+    id: purpose
+    attributes:
+      label: What do you want to use TokiAPI for?
+      description: A short description of your project or use case.
+      placeholder: "Example: evaluating coding agents against several model providers."
+    validations:
+      required: true
+
+  - type: input
+    id: models
+    attributes:
+      label: Models or providers you plan to use
+      description: List the model families or upstream providers you expect to call.
+      placeholder: "Example: Claude, GPT, Qwen, DeepSeek"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: volume
+    attributes:
+      label: Expected monthly volume
+      description: A rough estimate is fine.
+      options:
+        - Under 1 million tokens
+        - 1–10 million tokens
+        - 10–100 million tokens
+        - Over 100 million tokens
+        - Not sure yet
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: fair-use
+    attributes:
+      label: Fair use
+      options:
+        - label: I will use the invite for evaluation and will not resell access or share the key.
+          required: true
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Shared instance
+      options:
+        - label: I understand this is a shared instance without an SLA and I will not send sensitive data.
+          required: true
