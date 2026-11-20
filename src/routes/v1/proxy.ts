@@ -56,6 +56,7 @@ import {
 } from "../../lib/model-mask";
 import { parseProviderModels } from "../../lib/provider-models";
 import { resolveModelId, strip1mSuffix } from "../../lib/model-id";
+import { sanitizeToolCallPairs } from "../../lib/tool-call-hygiene";
 import {
   atOrThrow,
   isCircuitOpen,
@@ -105,6 +106,11 @@ import {
   wrapStreamWithSettlement,
 } from "../../lib/stream-settle";
 import type { SseFrameTransform } from "../../providers/sse-pipe";
+
+// 分支 3：message threads 的会话状态只能由 anthropic 方言上游承载；openai 候选
+// 跳过（多候选保留 failover），单候选/全部 openai → 400 fail-closed（不静默丢上下文）。
+const THREAD_REQUIRES_ANTHROPIC =
+  "message threads (thread field) require an Anthropic-protocol upstream; this route forwards to an OpenAI-compatible upstream and cannot reconstruct server-side thread state. Disable message threads in the client or configure an Anthropic-dialect provider.";
 
 // U7：非流式上游 body 读取的空闲超时（TTFB 超时只保护响应头前；body 中途停顿由
 // 本 helper 兜底）。逐 chunk 重置计时，超时 → 取消上游读并抛错（调用方按上游错误处理）。
@@ -368,6 +374,32 @@ const INPUT_SCHEMAS: Record<EndpointKind, ZodType> = {
   embeddings: embeddingsInputSchema,
 };
 
+/**
+ * 分支 1：Chat 入站恒等 + 工具配对卫生（design §2.1 A）。
+ * 浅克隆 messages / tool_calls 后再 sanitize，避免污染 rawBody（缓存键仍以 rawBody 为准）；
+ * completions / embeddings 端点不挂此转换（行为逐字节不变）。
+ */
+function chatToInternal(body: Record<string, unknown>): Record<string, unknown> {
+  const messages = body["messages"];
+  if (!Array.isArray(messages)) {
+    return body;
+  }
+  const cloned = messages.map((message) => {
+    if (!message || typeof message !== "object") return message;
+    const copy = { ...(message as Record<string, unknown>) };
+    if (Array.isArray(copy["tool_calls"])) {
+      copy["tool_calls"] = copy["tool_calls"].map((call) =>
+        call && typeof call === "object"
+          ? { ...(call as Record<string, unknown>) }
+          : call,
+      );
+    }
+    return copy;
+  });
+  sanitizeToolCallPairs(cloned as Record<string, unknown>[]);
+  return { ...body, messages: cloned };
+}
+
 /** 上游状态码 → Hono 合法内容状态码（仅非 2xx 分支进入，400-599 全为合法值）。 */
 function toContentStatus(status: number): ContentfulStatusCode {
   if (status >= 400 && status <= 599) {
@@ -521,6 +553,9 @@ export function proxyRouteWithOptions(
         anthropicExtras: passthroughAnthropicExtras
           ? extractAnthropicExtras(rawBody)
           : undefined,
+        // 分支 3：客户端 anthropic-beta 头逐字携带；openai 适配器不感知，
+        // anthropic 适配器/verbatim 仅 anthropic 方言注入。
+        anthropicBeta: c.req.header("anthropic-beta"),
       };
       const multiCandidate = candidates.length > 1;
 
@@ -709,6 +744,8 @@ export function proxyRouteWithOptions(
         verbatimRaw?: string;
         verbatimHeaders?: Record<string, string>;
       } | null = null;
+      // 分支 3：是否有候选因 thread 只能走 anthropic 方言而被跳过（全部跳过 → 400）。
+      let threadRejected = false;
       for (let i = 0; i < attempts.length; i++) {
         // i < attempts.length，索引必在界内（越界为不可达防御）
         const cand = atOrThrow(attempts, i, "attempts");
@@ -737,6 +774,21 @@ export function proxyRouteWithOptions(
             model: billingModel,
           });
           continue;
+        }
+
+        // 分支 3：message threads 的会话状态只能由 anthropic 方言上游承载。多候选跳过
+        // openai 候选（保留 failover，不写断路器——配置能力不匹配，非上游故障）；
+        // 单候选/全部 openai → 400 fail-closed（不静默丢上下文）。
+        if (rawBody["thread"] !== undefined && endpoint.dialect === "openai") {
+          if (multiCandidate) {
+            threadRejected = true;
+            logger.warn("thread_requires_anthropic_upstream", {
+              providerId: cand.providerId,
+              model: billingModel,
+            });
+            continue;
+          }
+          return c.json({ error: { message: THREAD_REQUIRES_ANTHROPIC } }, 400);
         }
 
         // 适配器按**端点方言**选（design §3 行 1；dialect 二值与现 ProviderType 同构）
@@ -831,7 +883,7 @@ export function proxyRouteWithOptions(
           // D2 分派（批次 3）：verbatim ⇒ 开集体 + 7 项注入（verbatimRequest，URL = 该面端点）；
           // convert ⇒ adapter.buildRequest 现路径逐字节不变（design §4.2）。
           upstreamReq = useVerbatim
-            ? verbatimRequest(rawBody, endpoint, cfg)
+            ? verbatimRequest(rawBody, endpoint, cfg, internalReq.anthropicBeta)
             : adapter.buildRequest(internalReq, cfg);
         } catch (error) {
           if (error instanceof AdapterError) {
@@ -994,6 +1046,11 @@ export function proxyRouteWithOptions(
         // 清除转移前记录的最后失败（转移后第二候选成功时不得回退到失败语义）
         lastError = null;
         break;
+      }
+
+      // 分支 3：全部候选都因 thread 需要 anthropic 方言而被跳过 → 400 fail-closed。
+      if (threadRejected) {
+        return c.json({ error: { message: THREAD_REQUIRES_ANTHROPIC } }, 400);
       }
 
       // 全部尝试失败（网络/超时/5xx/429 转移后仍失败）：返回最后一次尝试的真实错误（错误消息伪装）
@@ -1343,5 +1400,7 @@ export function proxyRoute(app: Hono<AppEnv>, kind: EndpointKind): void {
     inputSchema: INPUT_SCHEMAS[kind],
     kind,
     inboundFace: kind,
+    // 分支 1：仅 chat 入站挂工具配对卫生；completions/embeddings 零改动。
+    ...(kind === "chat" ? { toInternal: chatToInternal } : {}),
   });
 }

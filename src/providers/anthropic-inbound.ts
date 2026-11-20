@@ -114,7 +114,7 @@ export function buildInternalFromAnthropic(
 }
 
 /**
- * R1：提取 Anthropic 入站顶层透传字段（thinking / output_config，Claude Code 逐请求携带）。
+ * R1/分支 3：提取 Anthropic 入站顶层透传字段（thinking / output_config / thread / safeguards）。
  * 逐字提取、不校验形态（畸形值逐字透传 → 上游 400 显式暴露，不静默）。
  * 仅读顶层字段；无则 undefined。由 proxy 管道在 passthroughAnthropicExtras 开关下调用，
  * 结果经 InternalRequest.anthropicExtras 传给 anthropic 适配器写回上游。
@@ -122,13 +122,26 @@ export function buildInternalFromAnthropic(
 export function extractAnthropicExtras(body: JsonObject): {
   thinking?: unknown;
   output_config?: unknown;
+  thread?: unknown;
+  safeguards?: unknown;
 } {
-  const extras: { thinking?: unknown; output_config?: unknown } = {};
+  const extras: {
+    thinking?: unknown;
+    output_config?: unknown;
+    thread?: unknown;
+    safeguards?: unknown;
+  } = {};
   if (body["thinking"] !== undefined) {
     extras["thinking"] = body["thinking"];
   }
   if (body["output_config"] !== undefined) {
     extras["output_config"] = body["output_config"];
+  }
+  if (body["thread"] !== undefined) {
+    extras["thread"] = body["thread"];
+  }
+  if (body["safeguards"] !== undefined) {
+    extras["safeguards"] = body["safeguards"];
   }
   return extras;
 }
@@ -518,8 +531,19 @@ export function transformResponseToAnthropic(data: unknown): unknown {
     }
   }
 
+  // 分支 3：anthropic 上游 convert 路径保留键 → 真实响应 id / safeguard_results 逐字回写。
+  // openai 上游无该键 → 维持合成 msg_<uuid> 与现状（零回归）。
+  const passthroughRaw = response["_gateway_anthropic_passthrough"];
+  const passthrough =
+    passthroughRaw && typeof passthroughRaw === "object" && !Array.isArray(passthroughRaw)
+      ? (passthroughRaw as JsonObject)
+      : null;
+  const upstreamId = passthrough?.["id"];
   const result: JsonObject = {
-    id: newAnthropicMessageId(),
+    id:
+      typeof upstreamId === "string" && upstreamId.length > 0
+        ? upstreamId
+        : newAnthropicMessageId(),
     type: "message",
     role: "assistant",
     content,
@@ -527,6 +551,9 @@ export function transformResponseToAnthropic(data: unknown): unknown {
     stop_reason: mapToAnthropicStopReason(choice?.["finish_reason"]),
     stop_sequence: null,
   };
+  if (passthrough?.["safeguard_results"] !== undefined) {
+    result["safeguard_results"] = passthrough["safeguard_results"];
+  }
   const usage = response["usage"];
   if (usage && typeof usage === "object") {
     const u = usage as JsonObject;

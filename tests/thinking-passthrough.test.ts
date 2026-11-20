@@ -154,6 +154,32 @@ describe("anthropicAdapter.buildRequest（R1 extras 写回）", () => {
     // 未被覆盖的 output_config 仍来自 extras
     expect(body["output_config"]).toEqual(ADAPTIVE_EXTRAS.output_config);
   });
+
+  it("分支 3：extras thread/safeguards 逐字写回上游 body", () => {
+    const thread = { type: "continue", thread_id: "thr_unit_01" };
+    const safeguards = { policies: [{ id: "pol_1" }], mode: "server" };
+    const body = upstreamBody(makeReq({ thread, safeguards }), makeCfg());
+    expect(body["thread"]).toEqual(thread);
+    expect(body["safeguards"]).toEqual(safeguards);
+  });
+
+  it("分支 3：anthropicBeta 逐字写入 anthropic-beta 头；httpOptions.headers 覆盖优先", () => {
+    const req: InternalRequest = {
+      ...makeReq(),
+      anthropicBeta: "message-threads-2026-08-12, interleaved-thinking-2025-05-14",
+    };
+    const base = anthropicAdapter.buildRequest(req, makeCfg());
+    expect((base.init.headers as Record<string, string>)["anthropic-beta"]).toBe(
+      req.anthropicBeta,
+    );
+    const overridden = anthropicAdapter.buildRequest(req, {
+      ...makeCfg(),
+      httpOptions: { headers: { "anthropic-beta": "pinned-beta" } },
+    });
+    expect((overridden.init.headers as Record<string, string>)["anthropic-beta"]).toBe(
+      "pinned-beta",
+    );
+  });
 });
 
 // ============ 2. 管道级：anthropic 入站 → 上游请求体断言 ============
@@ -193,10 +219,15 @@ describe("端到端：Anthropic 入站 thinking/output_config 透传", () => {
     path: string,
     plaintext: string,
     body?: string,
+    extraHeaders: Record<string, string> = {},
   ): Promise<Response> {
     return selfFetch(`http://localhost${path}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": plaintext },
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": plaintext,
+        ...extraHeaders,
+      },
       body: body ?? anthropicBody(),
     });
   }
@@ -229,6 +260,39 @@ describe("端到端：Anthropic 入站 thinking/output_config 透传", () => {
     const upstream = JSON.parse(capturedBody) as Record<string, unknown>;
     expect(upstream["thinking"]).toEqual(ADAPTIVE_EXTRAS.thinking);
     expect(upstream["output_config"]).toEqual(ADAPTIVE_EXTRAS.output_config);
+  });
+
+  it("分支 3：anthropic 上游收到 thread/safeguards 逐字 + anthropic-beta 头", async () => {
+    const userId = await setupUser("r1-thread-upstream@test.dev", 10);
+    const { plaintext } = await setupKey(userId);
+    await setupAnthropicProviderWithModel(MODEL);
+    await setupPrice(MODEL, INPUT_PRICE, INPUT_PRICE, INPUT_PRICE / 4, OUTPUT_PRICE, OUTPUT_PRICE);
+
+    let capturedBody = "";
+    let capturedBeta = "";
+    stubUpstreamFetch((_url, init) => {
+      capturedBody = String(init.body ?? "");
+      capturedBeta = new Headers(init.headers).get("anthropic-beta") ?? "";
+      return new Response(JSON.stringify(anthropicResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const thread = { type: "continue", thread_id: "thr_unit_01" };
+    const safeguards = { policies: [{ id: "pol_1" }], mode: "server" };
+    const beta = "message-threads-2026-08-12, interleaved-thinking-2025-05-14";
+    const res = await postAnthropic(
+      "/anthropic/v1/messages",
+      plaintext,
+      anthropicBody({ thread, safeguards }),
+      { "anthropic-beta": beta },
+    );
+    expect(res.status).toBe(200);
+    const upstream = JSON.parse(capturedBody) as Record<string, unknown>;
+    expect(upstream["thread"]).toEqual(thread);
+    expect(upstream["safeguards"]).toEqual(safeguards);
+    expect(capturedBeta).toBe(beta);
   });
 
   it("openai 上游：extras 零泄漏（上游请求体不含 thinking/output_config）", async () => {

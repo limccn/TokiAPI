@@ -318,9 +318,9 @@ describe("convert 对照：同一夹具走遗留 anthropic 面，十项逐一有
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
 
-    // ① id 被重写（合成 msg_<uuid 去连字符>，32 位十六进制）
-    expect(body["id"]).not.toBe("msg_upstream_full_0001");
-    expect(body["id"]).toMatch(/^msg_[0-9a-f]{32}$/);
+    // ① id 透传上游真值（分支 3 起：message threads 的 previous_message_id 依赖真实 id；
+    //    convert 的判别力由下方字段重建/丢弃承担）
+    expect(body["id"]).toBe("msg_upstream_full_0001");
     // ② stop_sequence 恒 null
     expect(body["stop_sequence"]).toBeNull();
     // ③ stop_reason 塌缩：上游 stop_sequence → OpenAI stop → 回 end_turn
@@ -340,8 +340,11 @@ describe("convert 对照：同一夹具走遗留 anthropic 面，十项逐一有
     expect(toolUse?.["input"]).toEqual({});
     // ⑤ cache token 丢失（usage 只剩 input/output）
     expect(body["usage"]).toEqual({ input_tokens: 100, output_tokens: 50 });
-    // ⑨ 未知顶层键全丢
-    expect(body["safeguard_results"]).toBeUndefined();
+    // ⑨ 未列入透传通道的顶层键全丢；safeguard_results 为分支 3 已知透传（逐字回写）
+    expect(body["safeguard_results"]).toEqual({
+      checks: ["rule-a", "rule-b"],
+      verdict: "allowed",
+    });
     expect(body["container"]).toBeUndefined();
     expect(body["service_tier"]).toBeUndefined();
     expect(body["context_management"]).toBeUndefined();

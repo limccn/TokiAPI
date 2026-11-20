@@ -552,6 +552,22 @@ const message = await anthropic.messages.create({
 
 `Authorization: Bearer` 与 Anthropic 原生的 `x-api-key` 两种头都被接受。
 
+### Claude Code auto mode
+
+Claude Code 的服务端 auto mode 与 message threads 需要 Anthropic 协议上游。TokiAPI 会把客户端的
+`anthropic-beta`、`safeguards`、`thread` 逐字转发给 Anthropic 方言上游；非流式响应会保留上游的
+`safeguard_results` 与真实 message `id`。
+
+- **Anthropic 方言上游**：auto mode 与 message threads 与直连 Anthropic 行为一致。
+- **OpenAI 方言上游**：无法重建服务端 auto mode，请设 `CLAUDE_CODE_AUTO_MODE_SERVER=0` 使用客户端
+  分类器；请求携带 `thread` 且所有候选都是 OpenAI 方言时，网关返回 `400` 并给出指引，而不是静默丢掉
+  线程状态。
+- `anthropic-beta` 逐字转发；第三方中转若严格拒绝未知 beta，管理员可在 provider 的高级 HTTP 头中
+  固定 `anthropic-beta`。
+
+Codex 侧：中断的工具调用（例如 Smart Approvals 的 `request_permissions`）在转发前会被修复——缺失的
+output 补为 `[tool result unavailable: call interrupted]`，孤儿 output 被丢弃。
+
 ### 端点
 
 | 端点 | 协议 | 说明 |

@@ -268,6 +268,154 @@ describe("verbatimRequest — 头默认值按端点方言（与两适配器逐�
     expect(headers["Content-Type"]).toBe("application/json");
     expect(headers["Authorization"]).toBeUndefined();
   });
+
+  it("分支 3：anthropic 方言 + anthropicBeta → anthropic-beta 逐字注入；openai 方言不注入", () => {
+    const beta = "message-threads-2026-08-12, interleaved-thinking-2025-05-14";
+    const anthropicHeaders = upstreamHeaders(
+      verbatimRequest(
+        { model: "m-h3", max_tokens: 64, messages: [] },
+        MSG_VERBATIM,
+        cfg({ type: "anthropic" }),
+        beta,
+      ),
+    );
+    expect(anthropicHeaders["anthropic-beta"]).toBe(beta);
+
+    const openaiHeaders = upstreamHeaders(
+      verbatimRequest(
+        { model: "m-h3", messages: [] },
+        CHAT_VERBATIM,
+        cfg(),
+        beta,
+      ),
+    );
+    expect(openaiHeaders["anthropic-beta"]).toBeUndefined();
+  });
+
+  it("分支 3：httpOptions.headers.anthropic-beta 覆盖客户端值（逃生通道）", () => {
+    const headers = upstreamHeaders(
+      verbatimRequest(
+        { model: "m-h4", max_tokens: 64, messages: [] },
+        MSG_VERBATIM,
+        cfg({
+          type: "anthropic",
+          httpOptions: { headers: { "anthropic-beta": "pinned-beta" } },
+        }),
+        "client-beta",
+      ),
+    );
+    expect(headers["anthropic-beta"]).toBe("pinned-beta");
+  });
+});
+
+describe("verbatimRequest — Responses 面配对卫生（verbatim 路径）", () => {
+  it("孤儿 function_call → 合成 function_call_output；孤儿 output 丢弃", () => {
+    const body = upstreamBody(
+      verbatimRequest(
+        {
+          model: "m-resp-hyg",
+          input: [
+            { type: "function_call", call_id: "call_x", name: "request_permissions", arguments: "{}" },
+            { type: "function_call_output", call_id: "call_orphan", output: "stale" },
+            { role: "user", content: "continue" },
+          ],
+        },
+        RESPONSES_VERBATIM,
+        cfg(),
+      ),
+    );
+    expect(body["input"]).toEqual([
+      { type: "function_call", call_id: "call_x", name: "request_permissions", arguments: "{}" },
+      {
+        type: "function_call_output",
+        call_id: "call_x",
+        output: "[tool result unavailable: call interrupted]",
+      },
+      { role: "user", content: "continue" },
+    ]);
+  });
+
+  it("完整配对 → responses input 逐字节/结构不变（零回归）", () => {
+    const input = [
+      { type: "function_call", call_id: "call_full", name: "get_time", arguments: "{}" },
+      { type: "function_call_output", call_id: "call_full", output: "12:00" },
+      { role: "user", content: "hi" },
+    ];
+    const body = upstreamBody(
+      verbatimRequest({ model: "m-resp-hyg2", input }, RESPONSES_VERBATIM, cfg()),
+    );
+    expect(body["input"]).toEqual(input);
+  });
+});
+
+describe("verbatimRequest — Chat 面配对卫生（verbatim 路径）", () => {
+  it("孤儿 tool_calls 注入合成 tool 响应；孤儿 tool 消息丢弃", () => {
+    const body = upstreamBody(
+      verbatimRequest(
+        {
+          model: "m-chat-hyg",
+          messages: [
+            {
+              role: "assistant",
+              content: null,
+              tool_calls: [
+                {
+                  id: "call_chat",
+                  type: "function",
+                  function: { name: "get_time", arguments: "{}" },
+                },
+              ],
+            },
+            { role: "tool", tool_call_id: "call_orphan", content: "stale" },
+            { role: "user", content: "hi" },
+          ],
+        },
+        CHAT_VERBATIM,
+        cfg(),
+      ),
+    );
+    expect(body["messages"]).toEqual([
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: "call_chat",
+            type: "function",
+            function: { name: "get_time", arguments: "{}" },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        tool_call_id: "call_chat",
+        content: "[tool result unavailable: call interrupted]",
+      },
+      { role: "user", content: "hi" },
+    ]);
+  });
+
+  it("完整配对零改动", () => {
+    const messages = [
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: "call_full_chat",
+            type: "function",
+            function: { name: "get_time", arguments: "{}" },
+          },
+        ],
+      },
+      { role: "tool", tool_call_id: "call_full_chat", content: "12:00" },
+      { role: "user", content: "hi" },
+    ];
+    const body = upstreamBody(
+      verbatimRequest({ model: "m-chat-hyg2", messages }, CHAT_VERBATIM, cfg()),
+    );
+    expect(body["messages"]).toEqual(messages);
+  });
 });
 
 describe("verbatimRequest — 无状态红线（批次 9 前置，批次 3 边界 C）", () => {

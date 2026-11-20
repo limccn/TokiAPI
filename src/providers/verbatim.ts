@@ -23,6 +23,10 @@ import type { ResolvedEndpoint } from "./endpoints";
 import { assertStatelessResponsesBody } from "./responses";
 import { resolveModelId } from "../lib/model-id";
 import {
+  sanitizeResponsesInput,
+  sanitizeToolCallPairs,
+} from "../lib/tool-call-hygiene";
+import {
   ensureStreamIncludeUsage,
   stripGatewayReserved,
   stripReasoningRoundtrip,
@@ -39,6 +43,7 @@ export function verbatimRequest(
   rawBody: Record<string, unknown>,
   resolved: ResolvedEndpoint,
   cfg: ProviderConfig,
+  anthropicBeta?: string,
 ): UpstreamRequest {
   // 无状态红线（批次 9 前置 / 批次 3 边界 C）：responses 面的 verbatim 路径**显式**执行
   // previous_response_id / conversation 拒绝（与 buildInternalFromResponses 同一函数、同一文案
@@ -60,14 +65,34 @@ export function verbatimRequest(
   // 解析不命中映射——入站 schema 均要求 model，此为防御分支）
   const rawModel = typeof rawBody["model"] === "string" ? rawBody["model"] : "";
   const upstreamModel = resolveModelId(cfg.models, rawModel).upstream;
-  let body = applyHttpBody<Record<string, unknown>>(
-    // 注入 4 → 注入 2：reasoning 剥离（flag off 默认）套在保留键剥离之上，与适配器同序
-    stripReasoningRoundtrip(
-      stripGatewayReserved({ ...rawBody, model: upstreamModel }),
-      cfg.reasoningRoundtrip === true,
-    ),
-    cfg,
+  let body = stripReasoningRoundtrip(
+    stripGatewayReserved({ ...rawBody, model: upstreamModel }),
+    cfg.reasoningRoundtrip === true,
   );
+  // Responses 面 verbatim 不经过 buildInternalFromResponses：在原始 input items 上执行
+  // 同一套配对卫生（孤儿 function_call → 合成 output；孤儿 output 丢弃），再交给
+  // httpOptions.body 覆盖。非 responses 面零改动。
+  if (resolved.face === "responses" && Array.isArray(body["input"])) {
+    body = { ...body, input: sanitizeResponsesInput(body["input"]) };
+  } else if (resolved.face === "chat" && Array.isArray(body["messages"])) {
+    // Chat 面 verbatim（生产 custom providers 的 chat face 为 verbatim）不经过 proxy 的
+    // chatToInternal；在原始 messages 上执行同一套配对修复（浅克隆，不污染 rawBody）。
+    const messages = (body["messages"] as unknown[]).map((message) => {
+      if (!message || typeof message !== "object") return message;
+      const copy = { ...(message as Record<string, unknown>) };
+      if (Array.isArray(copy["tool_calls"])) {
+        copy["tool_calls"] = copy["tool_calls"].map((call) =>
+          call && typeof call === "object"
+            ? { ...(call as Record<string, unknown>) }
+            : call,
+        );
+      }
+      return copy;
+    });
+    sanitizeToolCallPairs(messages as Record<string, unknown>[]);
+    body = { ...body, messages };
+  }
+  body = applyHttpBody(body, cfg);
   // 注入 3：流式 include_usage（计费兜底，🔴 客户端无权关闭）——仅 chat 面
   if (resolved.face === "chat") {
     body = ensureStreamIncludeUsage(body).body;
@@ -78,6 +103,9 @@ export function verbatimRequest(
           "Content-Type": "application/json",
           "x-api-key": cfg.apiKey,
           "anthropic-version": "2023-06-01",
+          // 分支 3：客户端 beta 头逐字转发（仅 anthropic 方言）；httpOptions.headers
+          // 覆盖优先级由 buildUpstreamHeaders 保证。
+          ...(anthropicBeta !== undefined ? { "anthropic-beta": anthropicBeta } : {}),
         }
       : {
           "Content-Type": "application/json",
