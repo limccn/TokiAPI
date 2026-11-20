@@ -498,6 +498,18 @@ describe("buildInternalFromAnthropic（入站映射）", () => {
     expect(result["output_config"]).toBeUndefined();
   });
 
+  it("分支 3：thread/safeguards 不进内部形态（extras 通道接管）", () => {
+    const result = buildInternalFromAnthropic({
+      model: MODEL,
+      max_tokens: 10,
+      messages: [{ role: "user", content: "hi" }],
+      thread: { type: "create" },
+      safeguards: { policies: [{ id: "pol_1" }] },
+    });
+    expect(result["thread"]).toBeUndefined();
+    expect(result["safeguards"]).toBeUndefined();
+  });
+
   it("extractAnthropicExtras：逐字提取 thinking/output_config（畸形形态原样），无则 undefined", () => {
     expect(extractAnthropicExtras({
       model: MODEL,
@@ -516,6 +528,19 @@ describe("buildInternalFromAnthropic（入站映射）", () => {
     })).toEqual({ output_config: "malformed" });
     // 无任一字段 → 空对象
     expect(extractAnthropicExtras({ messages: [] })).toEqual({});
+  });
+
+  it("分支 3：extractAnthropicExtras 逐字提取 thread/safeguards（畸形形态原样）", () => {
+    const thread = { type: "continue", thread_id: "thr_unit_01" };
+    const safeguards = { policies: [{ id: "pol_1" }], mode: "server" };
+    expect(extractAnthropicExtras({ messages: [], thread, safeguards })).toEqual({
+      thread,
+      safeguards,
+    });
+    // 畸形形态逐字，不校验（上游 400 显式暴露）
+    expect(extractAnthropicExtras({ messages: [], thread: "malformed" })).toEqual({
+      thread: "malformed",
+    });
   });
 
   it("未知消息 role → AdapterError", () => {
@@ -542,6 +567,21 @@ describe("transformResponseToAnthropic（非流式出站）", () => {
     expect(result["stop_sequence"]).toBeNull();
     expect(result["model"]).toBe(MODEL);
     expect(result["usage"]).toEqual({ input_tokens: 100, output_tokens: 50 });
+  });
+
+  it("分支 3：保留键 _gateway_anthropic_passthrough → 真实 id / safeguard_results 逐字回写", () => {
+    const safeguardResults = [
+      { type: "safeguard_result", safeguard: "mock", result: "allow" },
+    ];
+    const result = transformResponseToAnthropic({
+      ...CHAT_RESPONSE,
+      _gateway_anthropic_passthrough: {
+        id: "msg_upstream_real",
+        safeguard_results: safeguardResults,
+      },
+    }) as Record<string, unknown>;
+    expect(result["id"]).toBe("msg_upstream_real");
+    expect(result["safeguard_results"]).toEqual(safeguardResults);
   });
 
   it("finish_reason → stop_reason 映射矩阵", () => {
@@ -1014,6 +1054,38 @@ describe("端到端：三路径等价（openai 上游）", () => {
     expect(await getBalance(userId)).toBeCloseTo(10 - 3 * EXPECTED_COST, 10);
     expect(await countTxByType(userId, "usage")).toBe(3);
     expect(await latestLogStatus(userId)).toBe("success");
+  });
+});
+
+describe("端到端：message threads 需要 anthropic 方言上游（分支 3）", () => {
+  it("openai 方言上游 + thread → 400 fail-closed，且不触达上游", async () => {
+    const model = "gpt-4o-mini-thread-openai";
+    const userId = await setupUser("anthro-thread-openai@test.dev", 10);
+    const { plaintext } = await setupKey(userId);
+    await setupProviderWithModel(model);
+    await setupPrice(model, INPUT_PRICE, INPUT_PRICE, INPUT_PRICE / 4, OUTPUT_PRICE, OUTPUT_PRICE);
+
+    let upstreamCalled = false;
+    stubUpstreamFetch(() => {
+      upstreamCalled = true;
+      return new Response(JSON.stringify(CHAT_RESPONSE), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const res = await postAnthropic(
+      "/v1/messages",
+      plaintext,
+      anthropicBody({
+        model,
+        thread: { type: "continue", thread_id: "thr_unit_01" },
+      }),
+    );
+    expect(res.status).toBe(400);
+    const text = await res.text();
+    expect(text).toContain("message threads");
+    expect(upstreamCalled).toBe(false);
   });
 });
 

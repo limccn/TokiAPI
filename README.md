@@ -593,6 +593,26 @@ const message = await anthropic.messages.create({
 
 Both `Authorization: Bearer` and Anthropic's native `x-api-key` header are accepted.
 
+### Claude Code auto mode
+
+Claude Code's server-side auto mode and message threads need an Anthropic-protocol upstream.
+TokiAPI forwards the client's `anthropic-beta`, `safeguards` and `thread` fields verbatim to
+Anthropic-dialect providers; non-stream responses keep the upstream `safeguard_results` and the
+real message `id`.
+
+- **Anthropic-dialect provider** — auto mode and message threads work as they do against Anthropic
+  itself.
+- **OpenAI-dialect provider** — server-side auto mode cannot be reconstructed. Set
+  `CLAUDE_CODE_AUTO_MODE_SERVER=0` to use the client-side classifier. A request that carries
+  `thread` and resolves only to OpenAI-dialect candidates returns `400` with guidance instead of
+  silently dropping the thread state.
+- `anthropic-beta` is forwarded verbatim. If a third-party relay rejects unknown betas, an
+  administrator can pin `anthropic-beta` in the provider's advanced HTTP headers.
+
+For Codex, interrupted tool calls (for example a Smart Approvals `request_permissions` call) are
+repaired before forwarding: a missing output becomes `[tool result unavailable: call interrupted]`,
+and orphan outputs are dropped.
+
 ### Endpoints
 
 | Endpoint | Protocol | Notes |

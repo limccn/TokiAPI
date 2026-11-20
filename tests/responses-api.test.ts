@@ -241,7 +241,7 @@ describe("buildInternalFromResponses（入站映射）", () => {
     ]);
   });
 
-  it("function_call item → assistant tool_calls；连续多个合并为一条 assistant 消息", () => {
+  it("function_call item → assistant tool_calls；连续多个合并为一条 assistant 消息；孤儿 call 注入合成 tool 响应（10-20 历史卫生）", () => {
     const result = buildInternalFromResponses({
       model: MODEL,
       input: [
@@ -249,6 +249,7 @@ describe("buildInternalFromResponses（入站映射）", () => {
         { type: "function_call", call_id: "call_2", name: "get_time", arguments: "{}" },
       ],
     });
+    // 两个 call 均无配对 output（中断历史）→ 合并 assistant 后紧随注入两条合成 tool 响应
     expect(result["messages"]).toEqual([
       {
         role: "assistant",
@@ -258,10 +259,12 @@ describe("buildInternalFromResponses（入站映射）", () => {
           { id: "call_2", type: "function", function: { name: "get_time", arguments: "{}" } },
         ],
       },
+      { role: "tool", tool_call_id: "call_1", content: "[tool result unavailable: call interrupted]" },
+      { role: "tool", tool_call_id: "call_2", content: "[tool result unavailable: call interrupted]" },
     ]);
   });
 
-  it("function_call_output item → tool 消息；output 数组 → JSON.stringify", () => {
+  it("function_call_output item → tool 消息；output 数组 → JSON.stringify；孤儿 output 丢弃（10-20 历史卫生）", () => {
     const result = buildInternalFromResponses({
       model: MODEL,
       input: [
@@ -269,10 +272,54 @@ describe("buildInternalFromResponses（入站映射）", () => {
         { type: "function_call_output", call_id: "call_2", output: [{ type: "output_text", text: "a" }] },
       ],
     });
+    // 两个 output 均无配对 call → 孤儿 tool 消息按卫生逻辑丢弃（上游反向 400 防护）
+    expect(result["messages"]).toEqual([]);
+  });
+
+  it("并行双 call + 单 output → 只为缺失 id 注入合成 tool 响应（Smart Approvals 并行场景）", () => {
+    const result = buildInternalFromResponses({
+      model: MODEL,
+      input: [
+        { type: "function_call", call_id: "call_a", name: "alpha", arguments: "{}" },
+        { type: "function_call", call_id: "call_b", name: "beta", arguments: "{}" },
+        { type: "function_call_output", call_id: "call_a", output: "ok" },
+        { role: "user", content: "continue" },
+      ],
+    });
     expect(result["messages"]).toEqual([
-      { role: "tool", tool_call_id: "call_1", content: "42" },
-      { role: "tool", tool_call_id: "call_2", content: '[{"type":"output_text","text":"a"}]' },
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          { id: "call_a", type: "function", function: { name: "alpha", arguments: "{}" } },
+          { id: "call_b", type: "function", function: { name: "beta", arguments: "{}" } },
+        ],
+      },
+      { role: "tool", tool_call_id: "call_a", content: "ok" },
+      { role: "tool", tool_call_id: "call_b", content: "[tool result unavailable: call interrupted]" },
+      { role: "user", content: "continue" },
     ]);
+  });
+
+  it("入站空 call_id + 空 output → 确定性重命名并 FIFO 配对（避开已用 id）", () => {
+    const result = buildInternalFromResponses({
+      model: MODEL,
+      input: [
+        { type: "function_call", call_id: "call_1", name: "existing", arguments: "{}" },
+        { type: "function_call_output", call_id: "call_1", output: "ok" },
+        { type: "function_call", call_id: "", name: "empty_id", arguments: "{}" },
+        { type: "function_call_output", call_id: "", output: "recovered" },
+      ],
+    });
+    const messages = result["messages"] as Array<Record<string, unknown>>;
+    const assistants = messages.filter((m) => m["role"] === "assistant");
+    expect(assistants).toHaveLength(2);
+    expect(
+      ((assistants[1]?.["tool_calls"] as Array<Record<string, unknown>>)[0] ?? {})["id"],
+    ).toBe("call_2");
+    const tools = messages.filter((m) => m["role"] === "tool");
+    expect(tools.map((m) => m["tool_call_id"])).toEqual(["call_1", "call_2"]);
+    expect(tools[1]?.["content"]).toBe("recovered");
   });
 
   it("reasoning item → 丢弃（不进 messages）", () => {
@@ -286,11 +333,11 @@ describe("buildInternalFromResponses（入站映射）", () => {
     expect(result["messages"]).toEqual([{ role: "user", content: "hi" }]);
   });
 
-  it("未知 input item 类型 → AdapterError", () => {
+  it("真正未识别的 input item 类型 → AdapterError", () => {
     expect(() =>
       buildInternalFromResponses({
         model: MODEL,
-        input: [{ type: "computer_call", name: "open_app" }],
+        input: [{ type: "future_unknown_item", name: "open_app" }],
       }),
     ).toThrow(AdapterError);
   });
@@ -463,20 +510,40 @@ describe("buildInternalFromResponses（入站映射）", () => {
     }
   });
 
-  it("custom_tool_call / custom_tool_call_output → call_id 配对类型保持 400（fail-closed）", () => {
-    // 配对类型成对降级需专门设计（孤儿 tool 消息风险）；computer_call 未知类型钉子已有，勿动
-    expect(() =>
+  it("custom_tool_call / custom_tool_call_output → 配对类型明确降级（丢弃 + 告警，不再 400）", () => {
+    // 10-16 批次 1（2026-11-20 最新 Codex 重放触发）：两侧都丢 ⇒ 无孤儿 tool 消息；
+    // verbatim 上游仍收原始 body，convert 上游丢失该工具历史（显式降级）。
+    const result = buildInternalFromResponses({
+      model: MODEL,
+      input: [
+        { type: "custom_tool_call", call_id: "call_1", name: "run", input: "x" },
+        { type: "custom_tool_call_output", call_id: "call_1", output: "done" },
+        { role: "user", content: "hi" },
+      ],
+    });
+    expect(result["messages"]).toEqual([{ role: "user", content: "hi" }]);
+  });
+
+  it("配对类型单边（中断历史）→ 丢弃而非 400；电脑工具同款", () => {
+    expect(
       buildInternalFromResponses({
         model: MODEL,
-        input: [{ type: "custom_tool_call", call_id: "call_1", name: "run", input: "x" }],
-      }),
-    ).toThrow(AdapterError);
-    expect(() =>
+        input: [
+          { type: "custom_tool_call", call_id: "call_1", name: "run", input: "x" },
+          { role: "user", content: "hi" },
+        ],
+      })["messages"],
+    ).toEqual([{ role: "user", content: "hi" }]);
+    expect(
       buildInternalFromResponses({
         model: MODEL,
-        input: [{ type: "custom_tool_call_output", call_id: "call_1", output: "x" }],
-      }),
-    ).toThrow(AdapterError);
+        input: [
+          { type: "computer_call", call_id: "call_c", action: { type: "click" } },
+          { type: "computer_call_output", call_id: "call_c", output: { ok: true } },
+          { role: "user", content: "hi" },
+        ],
+      })["messages"],
+    ).toEqual([{ role: "user", content: "hi" }]);
   });
 
   it("[reasoning, web_search_call, assistant] → pending reasoning 在 dropped item 处一并丢弃", () => {
@@ -524,7 +591,7 @@ describe("buildInternalFromResponses（入站映射）", () => {
     ]);
   });
 
-  it("reasoning + function_call → tool_calls 消息附 reasoning_content；连续 function_call 合并幂等", () => {
+  it("reasoning + function_call → tool_calls 消息附 reasoning_content；连续 function_call 合并幂等；孤儿 call 注入合成响应（10-20 历史卫生）", () => {
     const result = buildInternalFromResponses({
       model: MODEL,
       input: [
@@ -543,6 +610,8 @@ describe("buildInternalFromResponses（入站映射）", () => {
           { id: "call_2", type: "function", function: { name: "get_time", arguments: "{}" } },
         ],
       },
+      { role: "tool", tool_call_id: "call_1", content: "[tool result unavailable: call interrupted]" },
+      { role: "tool", tool_call_id: "call_2", content: "[tool result unavailable: call interrupted]" },
     ]);
   });
 
@@ -959,6 +1028,33 @@ describe("transformResponseToResponses（非流式出站）", () => {
     expect(result["status"]).toBe("completed");
   });
 
+  it("上游 tool_call id 为空 → 合成非空 call_id（call_ 前缀，id/call_id 同源）", () => {
+    const result = transformResponseToResponses({
+      id: "x",
+      object: "chat.completion",
+      created: 1,
+      model: MODEL,
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: "assistant",
+            content: null,
+            tool_calls: [
+              { id: "", type: "function", function: { name: "get_time", arguments: "{}" } },
+            ],
+          },
+          finish_reason: "tool_calls",
+        },
+      ],
+    }) as Record<string, unknown>;
+    const output = result["output"] as Array<Record<string, unknown>>;
+    const call = output[1] as Record<string, unknown>;
+    expect(call["type"]).toBe("function_call");
+    expect(String(call["call_id"])).toMatch(/^call_/);
+    expect(call["id"]).toBe(call["call_id"]);
+  });
+
   it("usage details 透传：cached_tokens / reasoning_tokens 对应字段；output_tokens 不重复加 reasoning", () => {
     const result = transformResponseToResponses({
       id: "x",
@@ -1136,6 +1232,23 @@ describe("transformStreamToResponses（流式出站）", () => {
 
     const completed = events[7] as Record<string, unknown>;
     expect((completed["response"] as Record<string, unknown>)["status"]).toBe("completed");
+  });
+
+  it("工具流：上游 id 为空 → 合成 call_ 前缀 call_id", async () => {
+    const sse = [
+      openaiChunk('[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"","type":"function","function":{"name":"get_time","arguments":"{}"}}]},"finish_reason":null}]'),
+      openaiChunk('[{"index":0,"delta":{},"finish_reason":"tool_calls"}]'),
+      "data: [DONE]",
+    ].join("\n\n") + "\n\n";
+    const text = await streamToText(transformStreamToResponses(sseStream(sse)));
+    const events = parseResponsesEvents(text);
+    const itemAdded = events.find(
+      (event) => event["type"] === "response.output_item.added",
+    ) as Record<string, unknown>;
+    const item = itemAdded["item"] as Record<string, unknown>;
+    expect(item["type"]).toBe("function_call");
+    expect(String(item["call_id"])).toMatch(/^call_/);
+    expect(String(item["call_id"]).length).toBeGreaterThan("call_".length);
   });
 
   it("无 usage 尾包：completed 不带 usage（免计路径）", async () => {
@@ -1563,17 +1676,20 @@ describe("端到端：错误码（OpenAI 形态错误体）", () => {
     expect(await countTxByType(userId, "usage")).toBe(0);
   });
 
-  it("400 未知 input item 类型", async () => {
+  it("400 真正未识别的 input item 类型", async () => {
     const userId = await setupUser("resp-400-item@test.dev", 10);
     const { plaintext } = await setupKey(userId);
     await setupProviderWithModel(MODEL);
     const res = await postResponses(
       plaintext,
-      JSON.stringify({ model: MODEL, input: [{ type: "computer_call", name: "open_app" }] }),
+      JSON.stringify({
+        model: MODEL,
+        input: [{ type: "future_unknown_item", name: "open_app" }],
+      }),
     );
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { message: string } };
-    expect(body["error"]?.["message"]).toContain("computer_call");
+    expect(body["error"]?.["message"]).toContain("future_unknown_item");
   });
 
   it("400 zod 校验（缺失 input）", async () => {

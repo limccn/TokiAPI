@@ -19,7 +19,20 @@ export interface InternalRequest {
    * 绕开内部 OpenAI 形态，由 anthropic 适配器逐字写回上游（不校验形态——
    * 畸形值由上游 400 显式暴露）；openai 适配器不感知（零泄漏）。
    */
-  anthropicExtras?: { thinking?: unknown; output_config?: unknown };
+  anthropicExtras?: {
+    thinking?: unknown;
+    output_config?: unknown;
+    /** Claude Code message threads（2026-11-02 beta）：convert 路径逐字写回 anthropic 上游。 */
+    thread?: unknown;
+    /** Claude Code auto mode 服务端评审请求字段：convert 路径逐字写回 anthropic 上游。 */
+    safeguards?: unknown;
+  };
+  /**
+   * 客户端 `anthropic-beta` 请求头（逐字，不解析；仅 anthropic 方言上游注入）。
+   * 优先级：provider httpOptions.headers["anthropic-beta"] > 本字段（适配器先注入
+   * defaults，buildUpstreamHeaders 再套 httpOptions 覆盖）。
+   */
+  anthropicBeta?: string;
 }
 
 /**

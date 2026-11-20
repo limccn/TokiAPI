@@ -11,6 +11,7 @@
 // 服务端执行类 input item（web_search_call 等 8 类白名单，DROPPED_INPUT_ITEM_TYPES）。
 import type { Logger } from "../lib/logger";
 import { logger as moduleLogger } from "../lib/logger";
+import { sanitizeToolCallPairs } from "../lib/tool-call-hygiene";
 import { AdapterError } from "./types";
 import {
   pipeSseStream,
@@ -73,7 +74,7 @@ export const INCLUDE_REASONING_ALLOWED = new Set([
  * 无状态重放 + `toInternal` 先于供应商候选循环（proxy.ts:421）⇒ 400 不可被故障转移自救、
  * 会永久毒化线程，故降级 drop+warn。
  * 配对类型（`computer_call`/`computer_call_output`、`custom_tool_call`/`custom_tool_call_output`）
- * 不入此名单：call_id 成对结构，成对降级需专门设计（孤儿 tool 消息风险），保持 400。
+ * 走 PAIRED_DROPPED_INPUT_ITEM_TYPES 的明确降级分支（逐项丢弃 + 告警，不再 400）。
  */
 const DROPPED_INPUT_ITEM_TYPES = new Set([
   "web_search_call",
@@ -84,6 +85,19 @@ const DROPPED_INPUT_ITEM_TYPES = new Set([
   "mcp_list_tools",
   "mcp_approval_request",
   "mcp_approval_response",
+]);
+
+/**
+ * 配对类型（call_id 成对）的明确降级名单（10-16 批次 1；2026-11-20 最新 Codex 真实重放触发）：
+ * `custom_tool_call` / `computer_call` 及其 output 当前无 Chat 对应物。逐项丢弃 + 告警：
+ * 两侧都丢 ⇒ 不产生孤儿 tool 消息；单边出现（中断历史）同样丢弃。verbatim 上游仍收到
+ * 原始 body；convert 上游会丢失该工具历史（已知损失，优于 toInternal 400 造成的线程永久毒化）。
+ */
+const PAIRED_DROPPED_INPUT_ITEM_TYPES = new Set([
+  "custom_tool_call",
+  "custom_tool_call_output",
+  "computer_call",
+  "computer_call_output",
 ]);
 
 export function parseIncludeReasoning(body: JsonObject, logger: Logger): boolean {
@@ -248,11 +262,16 @@ export function buildInternalFromResponses(
     }
   }
 
+  // 工具调用配对卫生（design §1.2/§1.3b）：instructions 与 input 共享同一 messages 数组，
+  // 故在两者 pushItems 完成后单遍执行一次。
+  sanitizeToolCallPairs(messages, logger);
+
   return internal;
 }
 
+
 /** input items 数组 → messages（逐条防御性转换；服务端执行类白名单 DROPPED_INPUT_ITEM_TYPES
- *  → drop+warn；其余不识别 item 类型 → 400）。
+ *  与配对类型 PAIRED_DROPPED_INPUT_ITEM_TYPES → drop+warn；其余不识别 item 类型 → 400）。
  *  extraTools：additional_tools items（Codex Responses Lite）携带的工具原始定义收集处。
  *  pendingReasoning：reasoning item 提取文本的挂载状态（只挂给下一个 assistant 消息）。 */
 function pushItems(
@@ -297,9 +316,22 @@ function pushItems(
       // （reasoning 只挂 assistant 消息）。与 tool_search 分支理由不同：白名单是真实可达路径的降级
       dropPendingReasoning(pendingReasoning, logger);
       logDropped(logger, `${type}_item`);
+    } else if (
+      typeof type === "string" &&
+      PAIRED_DROPPED_INPUT_ITEM_TYPES.has(type)
+    ) {
+      // 10-16 批次 1（2026-11-20 最新 Codex 真实重放触发）：配对类型明确降级。逐项丢弃；
+      // 两侧都丢 ⇒ 无孤儿 tool 消息。verbatim 上游仍收到原始 body；convert 上游丢失该工具
+      // 历史（已知损失，优于 toInternal 400 导致的线程永久毒化）。
+      dropPendingReasoning(pendingReasoning, logger);
+      logger.warn("responses_paired_item_dropped", {
+        type,
+        ...(typeof item["call_id"] === "string"
+          ? { call_id: item["call_id"] }
+          : {}),
+      });
     } else {
-      // computer_call / custom_tool_call 等配对类型与真正未识别类型：无法映射 → 400
-      // （配对类型成对降级需专门设计——孤儿 tool 消息风险比显式 400 更糟，fail-closed 保留）
+      // 真正未识别的 item 类型：无法映射 → 400（新配对类型先评估再入降级名单）
       throw new AdapterError(
         `Unsupported input item type '${String(type)}'`,
       );
@@ -920,7 +952,9 @@ export function transformResponseToResponses(
       if (typeof f["name"] !== "string") {
         continue;
       }
-      const callId = typeof call["id"] === "string" ? call["id"] : "";
+      // 空/缺失 id → 合成（design §1.3）：避免 Codex 自行合成 name:counter 造成跨轮错配
+      const rawCallId = typeof call["id"] === "string" ? call["id"] : "";
+      const callId = rawCallId.length > 0 ? rawCallId : newFunctionCallId();
       const args = f["arguments"];
       output.push({
         type: "function_call",
@@ -1267,7 +1301,9 @@ export function createStreamToResponsesTransform(
     const fnObj = fn && typeof fn === "object" ? (fn as JsonObject) : null;
     const fnName = fnObj !== null && typeof fnObj["name"] === "string" ? fnObj["name"] : "";
     const fnArgs = fnObj !== null ? fnObj["arguments"] : undefined;
-    const callId = typeof rawCall["id"] === "string" ? rawCall["id"] : "";
+    // 空/缺失 id → 合成（design §1.3）；同一 tool index 的后续 delta 复用首次结果。
+    const rawCallId = typeof rawCall["id"] === "string" ? rawCall["id"] : "";
+    const callId = rawCallId.length > 0 ? rawCallId : newFunctionCallId();
 
     let tool = toolItems.get(toolIndex);
     if (tool === undefined) {

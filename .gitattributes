@@ -1,0 +1,14 @@
+# Normalize text files to LF in the repository and on every checkout.
+# This overrides core.autocrlf so CI and Windows checkouts see the same bytes.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.zip binary
+*.pdf binary

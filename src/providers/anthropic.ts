@@ -117,6 +117,14 @@ function buildRequest(
     if (req.anthropicExtras.output_config !== undefined) {
       anthropicBody["output_config"] = req.anthropicExtras.output_config;
     }
+    // 分支 3：message threads / auto mode 服务端评审字段逐字写回（不校验形态，
+    // 畸形值由上游 400 显式暴露；httpOptions.body 覆盖仍在之后）。
+    if (req.anthropicExtras.thread !== undefined) {
+      anthropicBody["thread"] = req.anthropicExtras.thread;
+    }
+    if (req.anthropicExtras.safeguards !== undefined) {
+      anthropicBody["safeguards"] = req.anthropicExtras.safeguards;
+    }
   }
 
   // R2：reasoning_effort → Anthropic effort 映射（Codex/OpenAI 协议侧思考深度；
@@ -175,6 +183,11 @@ function buildRequest(
           "Content-Type": "application/json",
           "x-api-key": cfg.apiKey,
           "anthropic-version": "2023-06-01",
+          // 分支 3：客户端 beta 头逐字转发（anthropic 方言限定）；先入 defaults，
+          // 再由 buildUpstreamHeaders 套 httpOptions.headers 覆盖（逃生通道）。
+          ...(req.anthropicBeta !== undefined
+            ? { "anthropic-beta": req.anthropicBeta }
+            : {}),
         },
         cfg,
       ),
@@ -545,6 +558,19 @@ function transformResponse(body: unknown): unknown {
       },
     ],
   };
+  // 分支 3：上游响应顶层 id / safeguard_results 逐字保留，供 transformResponseToAnthropic
+  // 回写（message threads 的 previous_message_id 依赖真实响应 id；auto mode 需回带
+  // safeguard_results）。仅 anthropic 上游 convert 路径产生该保留键。
+  const passthrough: JsonObject = {};
+  if (typeof message["id"] === "string" && message["id"].length > 0) {
+    passthrough["id"] = message["id"];
+  }
+  if (message["safeguard_results"] !== undefined) {
+    passthrough["safeguard_results"] = message["safeguard_results"];
+  }
+  if (Object.keys(passthrough).length > 0) {
+    result["_gateway_anthropic_passthrough"] = passthrough;
+  }
   if (typeof promptTokens === "number" && typeof completionTokens === "number") {
     result["usage"] = {
       prompt_tokens: promptTokens,

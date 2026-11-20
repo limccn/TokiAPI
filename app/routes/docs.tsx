@@ -271,12 +271,43 @@ $env:ANTHROPIC_MODEL = "<model-name>"`}
                 </li>
               </ul>
 
+              <h3 className="pt-2 text-sm font-semibold text-foreground">
+                Auto mode and message threads
+              </h3>
+              <ul className="space-y-2">
+                <li>
+                  With an Anthropic-protocol upstream, the gateway forwards{" "}
+                  <Code>anthropic-beta</Code>, <Code>safeguards</Code> and <Code>thread</Code>{" "}
+                  verbatim. Server-side auto mode and message threads work as they do against
+                  Anthropic itself; non-stream responses keep the upstream{" "}
+                  <Code>safeguard_results</Code> and the real message <Code>id</Code>.
+                </li>
+                <li>
+                  With an OpenAI-dialect upstream, server-side auto mode cannot be reconstructed.
+                  Set <Code>CLAUDE_CODE_AUTO_MODE_SERVER=0</Code> to use the client-side
+                  classifier, or configure an Anthropic-dialect provider for the model.
+                </li>
+                <li>
+                  Message threads require an Anthropic-dialect upstream. If a request carries{" "}
+                  <Code>thread</Code> and resolves only to OpenAI-dialect candidates, the gateway
+                  returns <Code>400</Code> with guidance instead of silently dropping the thread
+                  state. Multi-provider pools skip OpenAI candidates and use an Anthropic-dialect
+                  candidate when one exists.
+                </li>
+                <li>
+                  <Code>anthropic-beta</Code> is forwarded verbatim. If a third-party relay rejects
+                  unknown betas, ask an administrator to pin <Code>anthropic-beta</Code> in the
+                  provider&apos;s advanced HTTP headers.
+                </li>
+              </ul>
+
               <h3 className="pt-2 text-sm font-semibold text-foreground">Verify</h3>
               <p>
                 Run <Code>claude</Code>, then <Code>/status</Code> and check the{" "}
                 <em className="italic text-foreground">Anthropic base URL</em> line. A request that
                 fails with <Code>400</Code> and mentions experimental betas is fixed by setting{" "}
-                <Code>CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1</Code>.
+                <Code>CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1</Code> or by pinning the beta value
+                on the provider.
               </p>
             </DocSection>
 
@@ -322,6 +353,18 @@ requires_openai_auth = false`}
                   Restart Codex (or the terminal) after editing — the config is read at startup.
                 </li>
               </ul>
+
+              <h3 className="pt-2 text-sm font-semibold text-foreground">
+                Interrupted tool calls
+              </h3>
+              <p>
+                Codex can replay an interrupted tool call (for example a Smart Approvals{" "}
+                <Code>request_permissions</Code> call) without the matching output. The gateway
+                repairs the history before forwarding it: a missing output becomes{" "}
+                <Code>[tool result unavailable: call interrupted]</Code>, and orphan outputs are
+                dropped. Upstreams no longer reject the turn with a <Code>tool_calls</Code> pairing{" "}
+                <Code>400</Code>, and no Codex setting is needed.
+              </p>
             </DocSection>
 
             <DocSection id="cc-switch" title="CC Switch">
@@ -490,6 +533,43 @@ requires_openai_auth = false`}
                   </TableRow>
                   <TableRow>
                     <TableCell className="align-top font-medium text-foreground">
+                      400 — tool_calls must be followed by tool messages
+                    </TableCell>
+                    <TableCell className="align-top">
+                      An interrupted agent turn left an unpaired tool call in the replayed history.
+                    </TableCell>
+                    <TableCell className="align-top">
+                      Upgrade the gateway to a build with protocol pairing hygiene — it repairs the
+                      history automatically. No client change is needed.
+                    </TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell className="align-top font-medium text-foreground">
+                      400 — message threads require an Anthropic-protocol upstream
+                    </TableCell>
+                    <TableCell className="align-top">
+                      The request carries <Code>thread</Code> but the model resolves only to
+                      OpenAI-dialect providers.
+                    </TableCell>
+                    <TableCell className="align-top">
+                      Use an Anthropic-dialect provider for this model, or disable message threads
+                      in the client.
+                    </TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell className="align-top font-medium text-foreground">
+                      Auto mode unavailable
+                    </TableCell>
+                    <TableCell className="align-top">
+                      Server-side auto mode needs an Anthropic-protocol upstream.
+                    </TableCell>
+                    <TableCell className="align-top">
+                      Set <Code>CLAUDE_CODE_AUTO_MODE_SERVER=0</Code>, or configure an
+                      Anthropic-dialect provider.
+                    </TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell className="align-top font-medium text-foreground">
                       Config changes have no effect
                     </TableCell>
                     <TableCell className="align-top">
@@ -535,6 +615,17 @@ requires_openai_auth = false`}
                   </TableRow>
                   <TableRow>
                     <TableCell className="align-top">
+                      <Code>POST /v1/messages</Code>
+                    </TableCell>
+                    <TableCell className="align-top">
+                      Anthropic Messages or OpenAI Chat (auto-detected)
+                    </TableCell>
+                    <TableCell className="align-top">
+                      Clients that need one entry for both protocols.
+                    </TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell className="align-top">
                       <Code>POST /v1/embeddings</Code>
                     </TableCell>
                     <TableCell className="align-top">OpenAI</TableCell>
@@ -560,6 +651,31 @@ requires_openai_auth = false`}
                   </TableRow>
                 </TableBody>
               </Table>
+              <h3 className="pt-2 text-sm font-semibold text-foreground">
+                Protocol passthrough
+              </h3>
+              <ul className="space-y-2">
+                <li>
+                  <Code>anthropic-beta</Code> is forwarded verbatim to Anthropic-dialect upstreams
+                  on both the convert and verbatim paths. <Code>anthropic-version</Code> stays
+                  pinned by the gateway.
+                </li>
+                <li>
+                  On Anthropic-dialect convert paths, <Code>thread</Code> and{" "}
+                  <Code>safeguards</Code> are forwarded; non-stream responses return the upstream{" "}
+                  <Code>safeguard_results</Code> and real message <Code>id</Code>.
+                </li>
+                <li>
+                  On <Code>/v1/responses</Code> and <Code>/v1/chat/completions</Code>, interrupted
+                  tool calls are repaired server-side (synthetic tool result; orphan tool outputs
+                  are dropped).
+                </li>
+                <li>
+                  A request carrying <Code>thread</Code> that resolves only to OpenAI-dialect
+                  candidates returns <Code>400</Code> (fail-closed); multi-provider pools fall
+                  through to an Anthropic-dialect candidate when one exists.
+                </li>
+              </ul>
               <p>Every proxy request authenticates with either header:</p>
               <CodeBlock
                 label="Authentication"

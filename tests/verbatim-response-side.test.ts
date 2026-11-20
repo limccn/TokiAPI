@@ -276,7 +276,8 @@ describe("边界 A：responses 入站 × verbatim chat 面候选 ⇒ convert 转
       }),
     });
     expect(res.status).toBe(200);
-    // convert：未知字段被白名单重建丢弃、响应经两级转换（合成 id）
+    // convert：未知字段被白名单重建丢弃；分支 3 起真实响应 id 透传（message threads 的
+    // previous_message_id 依赖上游真值，DESIGN §3.4）——convert 的判别力由 vendor_marker 丢弃承担。
     expect(calls).toHaveLength(1);
     const call = calls[0];
     if (call === undefined) {
@@ -285,7 +286,7 @@ describe("边界 A：responses 入站 × verbatim chat 面候选 ⇒ convert 转
     expect(upstreamJson(call)["vendor_marker"]).toBeUndefined();
     const body = (await res.json()) as Record<string, unknown>;
     expect(body["type"]).toBe("message");
-    expect(body["id"]).not.toBe("msg_up_conv");
+    expect(body["id"]).toBe("msg_up_conv");
   });
 });
 

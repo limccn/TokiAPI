@@ -15,11 +15,104 @@ const PORT = Number(process.env.MOCK_PORT ?? 8788);
 const OPENAI_KEY = "sk-mock-openai";
 const ANTHROPIC_KEY = "sk-mock-anthropic";
 
-// 最近收到的请求记录（E2E 断言上游 body 用；GET /__requests 可查询，cap 30 条）
+// 严格 tool 配对校验（E2E 用；MOCK_STRICT_TOOL_PAIRS=1 时复刻真实上游的反向 400）
+const STRICT_TOOL_PAIRS = process.env.MOCK_STRICT_TOOL_PAIRS === "1";
+
+// 安全头快照：只记录协议相关头；认证头打码，绝不落明文。
+function safeHeaders(req) {
+  const out = {};
+  for (const key of ["anthropic-beta", "anthropic-version", "content-type", "accept"]) {
+    if (typeof req.headers[key] === "string") out[key] = req.headers[key];
+  }
+  for (const key of ["authorization", "x-api-key"]) {
+    if (typeof req.headers[key] === "string") out[key] = "<redacted>";
+  }
+  return out;
+}
+
+// 未识别路径也记录（body=null, unknown=true）：E2E 诊断 404 落点，不影响 lastUpstream 的 body 断言。
+function recordUnknown(req, path) {
+  recentRequests.push({
+    at: Date.now(),
+    path,
+    method: req.method,
+    headers: safeHeaders(req),
+    body: null,
+    unknown: true,
+  });
+  if (recentRequests.length > 30) recentRequests.shift();
+}
+
+// 最近收到的请求记录（E2E 断言上游 body/headers 用；GET /__requests 可查询，cap 30 条）
 const recentRequests = [];
 function record(req, body) {
-  recentRequests.push({ at: Date.now(), path: req.url, method: req.method, body });
+  recentRequests.push({
+    at: Date.now(),
+    path: req.url,
+    method: req.method,
+    headers: safeHeaders(req),
+    body,
+  });
   if (recentRequests.length > 30) recentRequests.shift();
+}
+
+/** 严格配对校验：assistant tool_calls 后必须紧跟覆盖全部 id 的 tool 消息。 */
+function validateToolPairs(messages) {
+  if (!Array.isArray(messages)) return null;
+  let pending = new Set();
+  for (const message of messages) {
+    if (!message || typeof message !== "object") continue;
+    if (message.role === "assistant" && Array.isArray(message.tool_calls)) {
+      if (pending.size > 0) return "assistant tool_calls not followed by tool messages";
+      pending = new Set(
+        message.tool_calls
+          .map((call) => call?.id)
+          .filter((id) => typeof id === "string" && id.length > 0),
+      );
+      continue;
+    }
+    if (message.role === "tool") {
+      const id = message.tool_call_id;
+      if (typeof id !== "string" || !pending.has(id)) {
+        return "tool message without matching tool_calls";
+      }
+      pending.delete(id);
+      continue;
+    }
+    if (pending.size > 0) return "assistant tool_calls not followed by tool messages";
+  }
+  return pending.size > 0 ? "assistant tool_calls not followed by tool messages" : null;
+}
+
+/** 严格校验 Responses input 的 function_call/output 全局配对（MOCK_STRICT_TOOL_PAIRS=1）。 */
+function validateResponsesInput(input) {
+  if (!Array.isArray(input)) return null;
+  const calls = new Set();
+  const outputs = new Set();
+  for (const item of input) {
+    if (!item || typeof item !== "object") continue;
+    if (
+      item.type === "function_call" &&
+      typeof item.call_id === "string" &&
+      item.call_id.length > 0
+    ) {
+      calls.add(item.call_id);
+    }
+    if (
+      item.type === "function_call_output" &&
+      typeof item.call_id === "string" &&
+      item.call_id.length > 0
+    ) {
+      outputs.add(item.call_id);
+    }
+  }
+  for (const id of calls) {
+    if (!outputs.has(id)) return "function_call without matching function_call_output";
+  }
+  for (const id of outputs) {
+    if (!calls.has(id)) return "function_call_output without matching function_call";
+  }
+  return null;
 }
 
 function sendJson(res, status, body) {
@@ -114,12 +207,83 @@ const server = createServer(async (req, res) => {
       if (auth !== `Bearer ${OPENAI_KEY}`) {
         return sendJson(res, 401, { error: { message: "Mock upstream: invalid API key" } });
       }
+      // Responses 面 verbatim E2E：记录原始 input items；严格模式校验配对卫生。
+      if (method === "POST" && path === "/openai/v1/responses") {
+        const body = await readJson(req);
+        record(req, body);
+        if (STRICT_TOOL_PAIRS) {
+          const violation = validateResponsesInput(body?.input);
+          if (violation !== null) {
+            return sendJson(res, 400, {
+              error: { message: `Mock upstream: ${violation}` },
+            });
+          }
+        }
+        return sendJson(res, 200, {
+          id: "resp_mock_openai",
+          object: "response",
+          created_at: nowSeconds(),
+          status: "completed",
+          model: body?.model ?? "gpt-4o-mini",
+          output: [
+            {
+              type: "message",
+              id: "msg_mock_openai",
+              status: "completed",
+              role: "assistant",
+              content: [
+                {
+                  type: "output_text",
+                  text: "Hello from Responses mock",
+                  annotations: [],
+                },
+              ],
+            },
+          ],
+          output_text: "Hello from Responses mock",
+          usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 },
+        });
+      }
       if (method === "POST" && path === "/openai/v1/chat/completions") {
         const body = await readJson(req);
         record(req, body);
         const model = body?.model ?? "gpt-4o-mini";
+        if (STRICT_TOOL_PAIRS) {
+          const violation = validateToolPairs(body?.messages);
+          if (violation !== null) {
+            return sendJson(res, 400, {
+              error: {
+                message:
+                  "An assistant message with 'tool_calls' must be followed by tool messages responding to each 'tool_call_id'.",
+              },
+            });
+          }
+        }
         if (model === "error-500") {
           return sendJson(res, 500, { error: { message: "Mock upstream simulated failure" } });
+        }
+        // 出站空 call_id 合成测试：返回一个 id="" 的 tool_call（网关必须合成 call_ id）
+        if (model === "empty-tool-id") {
+          return sendJson(res, 200, {
+            id: "chatcmpl-empty-tool-id",
+            object: "chat.completion",
+            created: nowSeconds(),
+            model,
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: null,
+                  tool_calls: [
+                    { id: "", type: "function", function: { name: "get_time", arguments: "{}" } },
+                  ],
+                },
+                finish_reason: "tool_calls",
+              },
+            ],
+            usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+          });
         }
         if (body?.stream === true) {
           const chunk = (choices, extra) => ({
@@ -194,6 +358,7 @@ const server = createServer(async (req, res) => {
           ],
         });
       }
+      recordUnknown(req, path);
       return sendJson(res, 404, { error: { message: `Mock upstream: not found ${method} ${path}` } });
     }
 
@@ -212,7 +377,7 @@ const server = createServer(async (req, res) => {
         const hasTools = Array.isArray(body?.tools) && body.tools.length > 0;
 
         if (!stream) {
-          return sendJson(res, 200, {
+          const response = {
             id: "msg_mock_anthropic",
             type: "message",
             role: "assistant",
@@ -226,7 +391,15 @@ const server = createServer(async (req, res) => {
             stop_reason: "end_turn",
             stop_sequence: null,
             usage: { input_tokens: 25, output_tokens: 15 },
-          });
+          };
+          // 请求带 safeguards（Claude Code auto mode）→ 回带哨兵 safeguard_results，
+          // 供网关 convert 路径逐字回写断言。
+          if (body?.safeguards !== undefined) {
+            response.safeguard_results = [
+              { type: "safeguard_result", safeguard: "mock", result: "allow" },
+            ];
+          }
+          return sendJson(res, 200, response);
         }
 
         // 流式样例：有 tools 时走 tool_use 事件序列，否则走纯文本事件序列
@@ -299,6 +472,7 @@ const server = createServer(async (req, res) => {
       return sendJson(res, 404, { error: { message: `Mock upstream: not found ${method} ${path}` } });
     }
 
+    recordUnknown(req, path);
     return sendJson(res, 404, { error: { message: `Mock upstream: not found ${method} ${path}` } });
   } catch (error) {
     return sendJson(res, 500, { error: { message: `Mock upstream internal error: ${String(error)}` } });
