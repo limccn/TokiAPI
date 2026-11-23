@@ -67,7 +67,9 @@ without them.
 - **Rate limits and response cache.** Over-quota requests are rejected automatically; repeated
   non-streaming requests can be served from the edge.
 - **Share a live terminal (optional).** The Tokimeki integration issues Host/Session JWTs, one-time
-  share links, and a relay-only browser terminal for a running `tokimeki` session.
+  share links, and a relay-only browser terminal for a running `tokimeki` session. Open the hub at
+  **<https://tokiapi.app/tokimeki>** and read the
+  [usage guide](https://tokiapi.app/docs#tokimeki).
 - **Admin console.** Usage reports, keys, members, providers, model prices and account settings in one
   place.
 - **Your data stays in your account.** Users, keys, prices, balances and request logs live in your own
@@ -78,6 +80,9 @@ without them.
 A hosted instance runs at **<https://tokiapi.app>**, with the API at
 **<https://api.tokiapi.app/v1>** (OpenAI-compatible) and **<https://api.tokiapi.app/anthropic>**
 (Anthropic-native).
+
+The Tokimeki terminal-sharing hub is at **<https://tokiapi.app/tokimeki>**; its usage guide is
+**<https://tokiapi.app/docs#tokimeki>**.
 
 Email/password and phone registration require an invite code; GitHub sign-in is open. The instance is
 intended for evaluation: there is no SLA, capacity is limited, and you should not send sensitive data
@@ -312,11 +317,13 @@ Hosted auth needs both sides: this private key **and** the relay's
 `TOKIMEKI_JWT_JWKS_URL`, with matching issuer/audience. Neither side alone
 turns it on.
 
-The relay must be a 0.1.4 build with JWT verification and Session JWT support
-(`TOKIMEKI_JWT_JWKS_URL` pointing at this deployment). The legacy static `TOKIMEKI_MASTER_TOKEN`
+The relay must be a **0.1.4+** build (the Tokimeki v1.2 JWT line) with Host JWT and Session JWT
+verification (`TOKIMEKI_JWT_JWKS_URL` pointing at this deployment). The legacy static `TOKIMEKI_MASTER_TOKEN`
 remains only as a single-owner fallback on the relay; TokiAPI never stores or issues it.
 
 #### Pages and flows
+
+The end-user walkthrough lives at **<https://tokiapi.app/docs#tokimeki>**.
 
 - **`/tokimeki`** — public hub, redesigned as a 3-step wizard. Step 1 shows the install command
   (`npm install -g @limccn/tokimeki@latest`) with a "Skip next time" switch (cookie-remembered).
@@ -693,6 +700,18 @@ const message = await anthropic.messages.create({
 ```
 
 Both `Authorization: Bearer` and Anthropic's native `x-api-key` header are accepted.
+
+### Client versions
+
+Latest verified on 2026-11-20: Claude Code **2.1.329** and Codex CLI **0.171.0**.
+
+- **Claude Code 2.1.207+** — [version table](https://tokiapi.app/docs#claude-code). Server-side auto
+  mode and message threads require an Anthropic-dialect upstream; on an OpenAI-dialect upstream set
+  `CLAUDE_CODE_AUTO_MODE_SERVER=0`.
+- **Codex CLI 0.113+** — [version table](https://tokiapi.app/docs#codex-cli). Use
+  `wire_api = "responses"`; Responses Lite (0.149+) is adapted automatically. Responses stays
+  stateless (`previous_response_id` / `conversation` are rejected), and paired server-side tool items
+  degrade on convert paths.
 
 ### Claude Code auto mode
 
