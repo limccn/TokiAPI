@@ -66,6 +66,8 @@ without them.
 - **Prepaid billing.** Per-token pricing with a visible balance; failed requests are not charged.
 - **Rate limits and response cache.** Over-quota requests are rejected automatically; repeated
   non-streaming requests can be served from the edge.
+- **Share a live terminal (optional).** The Tokimeki integration issues Host/Session JWTs, one-time
+  share links, and a relay-only browser terminal for a running `tokimeki` session.
 - **Admin console.** Usage reports, keys, members, providers, model prices and account settings in one
   place.
 - **Your data stays in your account.** Users, keys, prices, balances and request logs live in your own
@@ -267,7 +269,106 @@ npx wrangler secret put GITHUB_CLIENT_SECRET   # GitHub sign-in
 npx wrangler secret put RESEND_API_KEY         # email verification (Resend)
 npx wrangler secret put SMS_ACCESS_KEY_ID      # SMS sign-in (Alibaba Cloud)
 npx wrangler secret put SMS_ACCESS_KEY_SECRET
+npx wrangler secret put TOKIMEKI_JWT_PRIVATE_JWK  # Tokimeki Host JWT signing key (ES256)
 ```
+
+### Tokimeki relay integration (optional)
+
+TokiAPI can host the **control plane** for [tokimeki](https://github.com/limccn/tokimeki): Host JWT
+issuance, share links, the web terminal, and anonymous host onboarding. The relay still owns the PTY
+and terminal data; TokiAPI only signs credentials and proxies the browser WebSocket.
+
+Generate an ES256 private JWK and store it as a Worker secret; the public half is published at
+`/api/tokimeki/jwks.json`:
+
+```bash
+node scripts/generate-tokimeki-key.mjs > tokimeki-jwk.json
+npx wrangler secret put TOKIMEKI_JWT_PRIVATE_JWK < tokimeki-jwk.json
+rm tokimeki-jwk.json
+```
+
+Set the deployment relay URL and (optionally) the anonymous token TTL:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `TOKIMEKI_RELAY_URL` | empty | Relay origin, e.g. `wss://relay.example.com`. Empty disables command/link generation and the browser WS proxy. |
+| `TOKIMEKI_ANON_HOST_TTL_SECONDS` | `86400` | Anonymous Host JWT lifetime (clamped 600..604800). Must be ≥ the relay's `TOKIMEKI_SESSION_MAX_TTL_SECONDS`. |
+| `TOKIMEKI_JWT_ISSUER` | `BETTER_AUTH_URL` origin | Must match the relay's issuer exactly. |
+| `TOKIMEKI_JWT_AUDIENCE` | `tokimeki-relay` | Must match the relay's audience. |
+| `TOKIMEKI_JWT_TTL_SECONDS` | `2592000` | Logged-in Host JWT lifetime (clamped 300..7776000). |
+
+#### Feature switch (implicit)
+
+There is **no** `TOKIMEKI_ENABLED` boolean. The integration is enabled when
+`TOKIMEKI_JWT_PRIVATE_JWK` is present and valid; `GET /api/config` publishes
+`tokimekiEnabled` and `tokimekiRelayUrl` for the UI. When the key is missing or
+invalid, the routes stay registered but fail closed: `/token`, `/invites*`,
+`/anon-host`, and `/attach/cli` return `503 Tokimeki is not configured`, and
+`/api/tokimeki/jwks.json` returns 404. `TOKIMEKI_RELAY_URL` is an independent prerequisite
+for command/link generation and the browser WS proxy (`503
+relay_not_configured` when empty).
+
+Hosted auth needs both sides: this private key **and** the relay's
+`TOKIMEKI_JWT_JWKS_URL`, with matching issuer/audience. Neither side alone
+turns it on.
+
+The relay must be a 0.1.4 build with JWT verification and Session JWT support
+(`TOKIMEKI_JWT_JWKS_URL` pointing at this deployment). The legacy static `TOKIMEKI_MASTER_TOKEN`
+remains only as a single-owner fallback on the relay; TokiAPI never stores or issues it.
+
+#### Pages and flows
+
+- **`/tokimeki`** — public hub, redesigned as a 3-step wizard. Step 1 shows the install command
+  (`npm install -g @limccn/tokimeki@latest`) with a "Skip next time" switch (cookie-remembered).
+  Step 2 picks Host or Attach (login-style segment): Host exposes Platform / Shell / ACP command,
+  and — for signed-in users — collapsible Session (rename / regenerate name and token), Passcode
+  (6-digit, generated with ↻/✎ controls), and Advanced options (window-size presets, browser
+  access, viewer/listener mode, share-link TTL presets 1h/8h/24h/7d); anonymous visitors only see
+  the three selects and call `POST /api/tokimeki/anon-host` once for a 4-character namespace,
+  session,   Host JWT, and invite URL. Step 3 shows the start command as a multi-line script (one
+  `export`/`$env:`/`set` line per `TOKIMEKI_*` variable, the `tokimeki …` command on the
+  last line — paste the whole block into any shell), a share link, and a
+  `tokimeki-config.json` download (the v2 `TOKIMEKI_CONFIG` envelope the CLI accepts as JSON
+  input, including passcode / window size when set); Attach shows a browser-open shortcut (when
+  allowed) and a per-platform/shell attach command.
+- **`/tokimeki/sessions`** — signed-in invite management as a card list: create viewer/listener
+  links (wizard-styled dialog with segment access, TTL presets, and switches), revoke them, and
+  regenerate per-shell CLI attach commands. Invite codes are stored only as SHA-256 hashes; the
+  URL is shown once and cannot be recovered.
+- **`/tokimeki/tokens`** — Host JWT metadata as a card list. Tokens are not stored in plaintext
+  and cannot be revoked before `exp`.
+- **`/#t-<code>`** — standalone web terminal (no dashboard layout). The proxy injects a short-lived
+  Session JWT server-side, strips TURN credentials from `welcome`/`ice`, and never exposes a JWT to
+  the browser. Fixed-window sessions (`display.fixed`) render the host's logical grid and scale it
+  to the viewport instead of resizing the PTY; the session passcode is remembered for the current
+  browser tab, so a refresh reconnects without asking again. On phones the viewer shows a custom
+  control pad (2×6 in portrait, 1×12 in landscape) with latched Ctrl/Alt/Shift, clipboard paste,
+  arrows and Enter. Its keyboard icon toggles the native keyboard; while it is up, a buffered input
+  box with a send icon appears above the keypad. TUI sessions also get circular floating
+  orientation and fit-screen toggles in the top-right corner; turning fit off keeps the grid at 1×
+  and lets portrait users scroll horizontally instead of shrinking the text.
+
+On the host machine, pass the issued JWT as `TOKIMEKI_TOKEN` together with `TOKIMEKI_NAMESPACE`
+(the 5-character prefix shown on the page; anonymous hosts use 4 characters and a two-word slug).
+The CLI sends it as `X-Tokimeki-Token` and does not need to know whether it is a JWT;
+`TOKIMEKI_NAMESPACE_TOKEN` is retired (a non-empty value makes the CLI exit). The hub supports two
+equivalent start modes: separate `TOKIMEKI_*` variables, or one `TOKIMEKI_CONFIG` JSON envelope
+(`v:2`, `relayUrl`, `token`, `namespace`, `session`, `sessionToken`). Viewers receive a Session JWT
+in `TOKIMEKI_SESSION_TOKEN` for the CLI, or use the share link in a browser.
+
+#### Security notes
+
+- The 6–8-digit session token (`TOKIMEKI_SESSION_TOKEN`) is a low-entropy shared viewer
+  credential; share the 16-character invite link instead. The two-word slug improves readability,
+  not secrecy. The token cannot be rotated for the session lifetime.
+- Session JWTs are short-lived (5 minutes for the web proxy, up to 24 hours for CLI attach) and
+  have no revocation list; revoking an invite only blocks new redemptions.
+- The optional session passcode (`TOKIMEKI_PASSCODE`) is separate from the 6–8-digit session
+  token. The relay enforces it with a 5-failure/30s lockout.
+- The browser is relay-only; TURN credentials never reach it.
+- The attach ticket cookie is origin-wide; opening two different share links in
+  the same browser profile can overwrite the pending ticket. Use one active
+  link per browser profile in v1.
 
 ### 4. Create a GitHub OAuth App and bootstrap the first admin
 

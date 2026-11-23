@@ -27,12 +27,15 @@ OpenAI 兼容的 **AI API 网关**：单入口代理多家模型供应商（Open
 
 | 形态 | 文件 | 内容 | 谁在用 |
 | --- | --- | --- | --- |
-| 提交入库 | `wrangler.jsonc` | 占位资源 id（一键部署自动供给并回写真实 id）+ `[vars]` 23 键安全缺省 + **无 routes / 无 env / 无 placement** | 本地 dev / test / CI、一键部署（Workers Builds）、手动部署的缺省 |
+| 提交入库 | `wrangler.jsonc` | 占位资源 id（一键部署自动供给并回写真实 id）+ `[vars]` 28 键安全缺省 + **无 routes / 无 env / 无 placement** | 本地 dev / test / CI、一键部署（Workers Builds）、手动部署的缺省 |
 | 维护者 fork | `wrangler.prod.jsonc`（gitignored） | 真实域名 routes（管理台域 + API 域，`custom_domain`）+ 真实 D1/KV id + 个性化 vars + placement | 仅 `npm run deploy` 自动选中 |
 
 - 选择逻辑在 `scripts/deploy.mjs`：fork 存在 → 用 fork；否则用 jsonc。**防呆语义**：维护者肌肉记忆 `npm run deploy` 误用占位 id 覆盖真实生产 worker 绑定，在结构上不可能。
 - `--dry-run` 旗标：`npm run deploy -- --dry-run` 只 build + 打印选中配置与将执行的远程命令（AC6 验证路径）。
 - **三条写配置陷阱**（详见 `wrangler.jsonc` 头注）：① 占位 id 是按钮期望的形态，本地 miniflare 不校验真实存在；② **`wrangler deploy --dry-run` 不校验 `[[queues.producers]]` 指向的队列是否存在**——dry-run 绿只证明配置结构合法，资源就绪以账号侧实查为准（`wrangler queues list` / `wrangler kv namespace list`）；③ **queue() 按队列名精确比对分流**——`BILLING_QUEUE_NAME` `[vars]` 必须与 producers 里 BILLING_QUEUE 的 `queue` 字面一致，漂移 = 计费批静默落进用量分支（不扣费且账上无痕），改队列名两处一起改（`tests/config-fork.test.ts` 钉此不变式）。
+- **Tokimeki 配置面**：`TOKIMEKI_JWT_ISSUER` / `TOKIMEKI_JWT_AUDIENCE` / `TOKIMEKI_JWT_TTL_SECONDS` / `TOKIMEKI_RELAY_URL` / `TOKIMEKI_ANON_HOST_TTL_SECONDS` 是非敏感 `[vars]`（缺省安全：issuer/relay 空，匿名 TTL 86400）；ES256 私钥仍走 `wrangler secret put`，键名已进 `tests/config-fork.test.ts` 的 secret 扫描（不得出现在任何 jsonc，含注释）。**隐式开关**：没有 `TOKIMEKI_ENABLED`；`TOKIMEKI_JWT_PRIVATE_JWK` 缺失/非法 = 功能关闭（`/api/config.tokimekiEnabled=false`；`/token`、`/invites*`、`/anon-host`、`/attach/cli` 503，`/api/tokimeki/jwks.json` 404）。`TOKIMEKI_RELAY_URL` 独立控制命令/链接生成与 WS 代理（空 = `relay_not_configured`）。
+- **Tokimeki v1.2 模块**（`src/routes/tokimeki/`）：任务 1 的 `/token`、`/tokens` 与公开 JWKS `/api/tokimeki/jwks.json`；任务 2 的 `GET /namespace`、`POST/GET /invites`、`DELETE /invites/:id`、`POST /invites/:id/token`、公开 `POST /attach`（一次性 cookie）、`POST /attach/cli`（CLI Session JWT）、`GET /ws`（WS 代理，剥离 TURN）；任务 3 的公开 `POST /anon-host`（4 位 namespace + 双词 slug + 24h Host JWT + invite）。invite 只存 code 哈希；`passcodeRequired` 只表示 D 的 passcode，不是 6–8 位 session token。Hub 支持 env 与 `TOKIMEKI_CONFIG` 两种启动命令。`/attach`、`/attach/cli` 用 credential 桶，`/anon-host` 用独立 `TOKIMEKI_ANON_LIMIT` 桶（10/60s）。
+- **`.npmrc` 把 `@limccn` 固定到 npmjs**：`@limccn/tokimeki-protocol` 是公开包，CI / Workers Builds 没有 GitHub Packages token；不要删除该文件或把 lockfile 的 `resolved` 改回 `npm.pkg.github.com`（会 401）。
 - 迁移形态：`drizzle/` 迁移用 **binding 名**引用（`wrangler d1 migrations apply DB --remote`）；`npm run deploy` 在 deploy 前自动执行。**D1 迁移只增不改**（保证 `wrangler rollback` 兼容旧版本）；回滚用 `wrangler rollback`，勿改已应用迁移。
 
 ## 常用命令
@@ -107,9 +110,9 @@ git branch -d feat/<name>                          # ⑤ 删除
 - `BETTER_AUTH_URL` 同时是双域名分流的「平台域」真源（`new URL(BETTER_AUTH_URL).hostname`，见 `src/lib/domains.ts`）。缺省 localhost 是已知错误值特征：管理面（`/api/*` 与 SPA）会被 301 到 `https://localhost/...`，`/v1` 照常——**部分可用**，部署后必须改成实际 origin。
 - GitHub OAuth 回调必须精确等于 `https://<origin>/api/auth/callback/github`（origin 与 `BETTER_AUTH_URL` 一致）；`ADMIN_EMAILS`（11-06 起）是**自动提权名单**：名单内邮箱的账号注册/登录即 admin（只升不降），**空 = 无人自动提权**；GitHub 登录本身不受名单限制（2026-11-06 起开放注册）。
 - **两处收件人白名单语义相同：空 = 全放行**（`SMS_ALLOWED_PHONES` 与 `EMAIL_ALLOWED_RECIPIENTS`），不要写成「邮件空 = 全拒」。短信名单写成全部非法值 = **全拒**（fail-closed，刻意不退化成全放行）；邮件名单无此「全非法」态（非空即可比对）。号码只认规范形 `+86` + `11` 位（`^\+861[3-9]\d{9}$`），落库/比对/白名单共用 `src/lib/phone.ts` 的同一判据。
-- `[[ratelimits]]` 的 `namespace_id` 是**账号级**命名空间：同账号同值跨 Worker 共享计数。一键部署用户各自部署到各自账号，1001/1002 无碰撞；**同账号部署多个实例时须自行错开段位**。
+- `[[ratelimits]]` 的 `namespace_id` 是**账号级**命名空间：同账号同值跨 Worker 共享计数。一键部署用户各自部署到各自账号，1001/1002/1003 无碰撞（stg fork 用 2001/2002/2003）；**同账号部署多个实例时须自行错开段位**。
 - 本地 curl 验证线上可能需 `--ssl-no-revoke`（Windows schannel CRL）与自定义域名（workers.dev 域名在部分网络被 DNS 污染）。
-- cron 每日 02:00 UTC 清理 `request_logs`（保留 `REQUEST_LOG_RETENTION_DAYS`，缺省 30）。
+- cron 每日 02:00 UTC 清理 `request_logs`（保留 `REQUEST_LOG_RETENTION_DAYS`，缺省 30），并清理过期 Tokimeki invite/attach ticket（保留 7 天，先 tickets 后 invites）。
 - vite 插件构建会在 `dist/` 产出生成的 `wrangler.json`（丢注释、丢 routes 细节）——部署一律走 `npm run deploy`（内部显式 `--config <选中>`）或显式 `--config`，勿依赖构建产物里的配置。
 
 ## 部署要点

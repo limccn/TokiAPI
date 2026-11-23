@@ -61,6 +61,8 @@ TokiAPI 是一个自托管的 AI API 网关。它把**一个 OpenAI 兼容端点
 - **团队密钥。** 按人或按应用签发 key，设置限流，随时吊销。
 - **预付费计费。** 按 token 计价，余额可见；失败的请求不计费。
 - **限流与响应缓存。** 超额请求自动拒绝；重复的非流式请求可由边缘缓存直接返回。
+- **分享实时终端（可选）。** Tokimeki 集成可签发 Host/Session JWT、一次性分享链接，并为运行中的
+  `tokimeki` 会话提供仅走 relay 的浏览器终端。
 - **管理台。** 用量报表、密钥、成员、供应商、模型价格与账户设置集中在一处。
 - **数据留在自己的账号。** 用户、密钥、价格、余额与请求日志都在你自己的 Cloudflare D1/KV 资源里。
 
@@ -249,7 +251,74 @@ npx wrangler secret put GITHUB_CLIENT_SECRET   # GitHub 登录
 npx wrangler secret put RESEND_API_KEY         # 邮箱验证（Resend）
 npx wrangler secret put SMS_ACCESS_KEY_ID      # 短信登录（阿里云）
 npx wrangler secret put SMS_ACCESS_KEY_SECRET
+npx wrangler secret put TOKIMEKI_JWT_PRIVATE_JWK  # Tokimeki Host JWT 签名私钥（ES256）
 ```
+
+### Tokimeki relay 接入（可选）
+
+TokiAPI 可作为 tokimeki 的**控制面**：签发 Host JWT、生成分享链接、托管 Web 终端、提供匿名
+host 入口。终端数据仍然由 relay/PTY 承载；TokiAPI 只签发凭证并代理浏览器 WebSocket。
+
+生成 ES256 私钥 JWK 并写入 Worker secret，公钥由 `/api/tokimeki/jwks.json` 公开：
+
+```bash
+node scripts/generate-tokimeki-key.mjs > tokimeki-jwk.json
+npx wrangler secret put TOKIMEKI_JWT_PRIVATE_JWK < tokimeki-jwk.json
+rm tokimeki-jwk.json
+```
+
+部署级 relay 地址与匿名 token TTL：
+
+| 变量 | 缺省 | 含义 |
+|---|---|---|
+| `TOKIMEKI_RELAY_URL` | 空 | relay origin，如 `wss://relay.example.com`；空 = 禁用命令/链接生成 |
+| `TOKIMEKI_ANON_HOST_TTL_SECONDS` | `86400` | 匿名 Host JWT 有效期（clamp 600..604800），不得小于 relay 的 `TOKIMEKI_SESSION_MAX_TTL_SECONDS` |
+| `TOKIMEKI_JWT_ISSUER` | `BETTER_AUTH_URL` origin | 必须与 relay 配置逐字一致 |
+| `TOKIMEKI_JWT_AUDIENCE` | `tokimeki-relay` | 必须与 relay 一致 |
+| `TOKIMEKI_JWT_TTL_SECONDS` | `2592000` | 登录 Host JWT 有效期（clamp 300..7776000） |
+
+relay 必须是 v1.2 构建，支持 Host JWT 与 Session JWT 验签（`TOKIMEKI_JWT_JWKS_URL` 指向本
+部署）。静态 `TOKIMEKI_MASTER_TOKEN` 仅作为 relay 的单人独占回退，TokiAPI 不存储也不签发它。
+
+#### 页面与流程
+
+- **`/tokimeki`** — 公开 Hub，三步向导式流程。第一步展示安装命令（`npm install -g
+  @limccn/tokimeki@latest`）与 "Skip next time" 开关（cookie 记忆，下次直达第二步）。第二步
+  以分段控件选择 Host / Attach：Host 暴露 Platform / Shell / ACP 命令，登录用户另可展开
+  Session（改名/随机重生成 name 与 token）、Passcode（6 位数字，↻/✎ 控制）与 Advanced
+  选项（窗口尺寸预设、浏览器接入、viewer/listener 模式、分享链接 TTL 预设 1h/8h/24h/7d）；
+  未登录用户只见三个选择框，调用一次 `POST /api/tokimeki/anon-host` 获得 4 位 namespace、
+  session、Host JWT 与 invite URL。第三步展示的启动命令为**多行脚本**（每个 `TOKIMEKI_*`
+  变量一行 `export`/`$env:`/`set` 赋值，最后一行执行 `tokimeki …` —— 整块复制进任意 shell
+  直接运行）、分享链接，以及 `tokimeki-config.json` 下载（CLI 可直接使用的 v2
+  `TOKIMEKI_CONFIG` JSON 信封，开启 passcode/窗口尺寸时会一并包含）；Attach 侧提供浏览器
+  直开快捷入口（会话允许时）与按平台/shell 生成的 attach 命令。
+- **`/tokimeki/sessions`** — 登录用户的 invite 管理，卡片列表呈现：创建 viewer/listener 链接
+  （向导风格弹窗：segment 接入模式、TTL 预设、Switch 开关）、撤销、按 shell 重新生成 CLI
+  attach 命令。invite code 只存 SHA-256 哈希，URL 只展示一次且无法恢复。
+- **`/tokimeki/tokens`** — Host JWT 元数据，卡片列表呈现；不存明文，到期前无法撤销。
+- **`/#t-<code>`** — 独立 Web 终端（不套管理台布局）。代理在服务端注入短期 Session JWT，从
+  `welcome`/`ice` 剥离 TURN 凭据，浏览器永远接触不到 JWT。固定窗口会话（`display.fixed`）按
+  host 的逻辑网格渲染并缩放到可视区，不再 resize PTY；session passcode 只在当前浏览器标签页内
+  记住，刷新后可直接重连。移动端提供竖屏 2×6、横屏 1×12 的自定义按键栏（Ctrl/Alt/Shift 可锁定、
+  支持粘贴与方向键）；按键栏的键盘图标按钮切换系统输入键盘，键盘弹出时上方出现带发送图标按钮的缓冲
+  输入框（支持多行，发送时自动回车）。TUI 会话右上角另有半透明的横竖屏与 fit 屏幕切换按钮；
+  竖屏关闭 fit 后按 1× 渲染并允许水平滚动，避免文字被过度缩小。
+
+host 机器上把签发的 JWT 作为 `TOKIMEKI_TOKEN`，同时给出 `TOKIMEKI_NAMESPACE`（页面显示的
+5 位前缀；匿名 host 为 4 位）。CLI 统一以 `X-Tokimeki-Token` 发送，不需要判断它是不是 JWT；
+`TOKIMEKI_NAMESPACE_TOKEN` 已退役（非空值会让 CLI 直接退出）。viewer 的 CLI 使用
+`TOKIMEKI_SESSION_TOKEN`（Session JWT），浏览器则直接打开分享链接。
+
+#### 安全说明
+
+- 6 位会话访问码（`TOKIMEKI_SESSION_TOKEN`）是低熵共享 viewer 凭证；请分享 16 位 invite 链接，
+  且它在 session 生命周期内无法轮换。
+- Session JWT 短期有效（Web 代理 5 分钟，CLI attach 最长 24 小时），没有撤销列表；撤销 invite
+  只阻止新的兑换。
+- 可选 session passcode（`TOKIMEKI_PASSCODE`）与 6 位访问码是两套机制；relay 以 5 次失败/30s
+  锁定执行。
+- 浏览器只走 relay，TURN 凭据不会下发。
 
 ### 4. 创建 GitHub OAuth App 并引导首个管理员
 
