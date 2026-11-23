@@ -42,6 +42,22 @@ interface Env {
   BILLING_QUEUE_NAME?: string;
   // 网关 API Key 明文前缀（缺省 "sk-"；空白视为未设置，回退默认。仅影响新生成 Key）
   API_KEY_PREFIX?: string;
+  // ---- Tokimeki master token（11-18-tokimeki-master-token）----
+  // ES256 私钥（private JWK JSON，含 kid；kid 长度上限 128，超限 = 未配置）。**真实 secret**：
+  // 生产 `wrangler secret put`，本地写 .dev.vars。缺失/非法 = 整组功能关闭（/api/config.tokimekiEnabled=false）。
+  TOKIMEKI_JWT_PRIVATE_JWK?: string;
+  // JWT iss（缺省取 BETTER_AUTH_URL 的 origin）。必须与 relay 的 TOKIMEKI_JWT_ISSUER 一致；
+  // 长度上限 512（超限 = 未配置，与 relay 校验一致）。
+  TOKIMEKI_JWT_ISSUER?: string;
+  // JWT aud（缺省 tokimeki-relay）。必须与 relay 配置一致；长度上限 256（超限 = 未配置）。
+  TOKIMEKI_JWT_AUDIENCE?: string;
+  // Host JWT 有效期（秒；缺省 2592000 = 30 天，clamp 300..7776000）。
+  TOKIMEKI_JWT_TTL_SECONDS?: string;
+  // relay 地址（非敏感，任务 3 的命令生成/代理使用；只读展示，避免 SSRF）。
+  TOKIMEKI_RELAY_URL?: string;
+  // 匿名 Host JWT 有效期（秒；缺省 86400，clamp 600..604800）。**不得小于 relay 的**
+  // TOKIMEKI_SESSION_MAX_TTL_SECONDS（默认 86400），否则 host 断线重连会因 JWT 过期失败。
+  TOKIMEKI_ANON_HOST_TTL_SECONDS?: string;
   // 全局响应缓存总开关（09-03-stg-cache-investigation；部署配置 [vars]，缺省 false = 关闭）：
   // 即使 key.cacheEnabled=true 也不缓存；true/1/yes/on = 开启。本地覆盖写在 .dev.vars 同名键。
   CACHE_ENABLED?: string;
@@ -117,4 +133,6 @@ interface Env {
   // 与 tests/test-env.d.ts 的 Cloudflare.Env 声明必须一致（那是 cloudflare:test 侧的平行声明）。
   AUTH_CREDENTIAL_LIMIT?: RateLimit;
   AUTH_EMAIL_LIMIT?: RateLimit;
+  // 11-18-tokimeki-getting-started：匿名 host 签发独立桶（每次签发 JWT + 写 invite）。
+  TOKIMEKI_ANON_LIMIT?: RateLimit;
 }

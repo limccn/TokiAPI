@@ -110,7 +110,16 @@ export async function withSwitch<T>(
     | "SMS_ACCESS_KEY_ID"
     | "SMS_ACCESS_KEY_SECRET"
     // 11-08-reward-semantics-overhaul：GitHub 绑定赠金金额（settings.test.ts 翻成 0 验 env 生效）。
-    | "GITHUB_BIND_BONUS_AMOUNT",
+    | "GITHUB_BIND_BONUS_AMOUNT"
+    // 11-18-tokimeki-master-token：私钥/TTL/issuer/audience（测试注入 ES256 密钥与短 TTL）。
+    | "TOKIMEKI_JWT_PRIVATE_JWK"
+    | "TOKIMEKI_JWT_ISSUER"
+    | "TOKIMEKI_JWT_AUDIENCE"
+    | "TOKIMEKI_JWT_TTL_SECONDS"
+    // 11-18-tokimeki-share-link-attach：relay 上游（WS 错误路径/URL 组装测试）。
+    | "TOKIMEKI_RELAY_URL"
+    // 11-18-tokimeki-getting-started：匿名 Host JWT TTL。
+    | "TOKIMEKI_ANON_HOST_TTL_SECONDS",
   value: string | undefined,
   fn: () => Promise<T>,
 ): Promise<T> {

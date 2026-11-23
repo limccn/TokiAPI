@@ -22,6 +22,12 @@ RESEND_API_KEY=
 # 建议用只授 `dypns:SendSmsVerifyCode` 的 RAM 子账号；泄露时先在 RAM 禁用/删除再换新。
 SMS_ACCESS_KEY_ID=
 SMS_ACCESS_KEY_SECRET=
+# Tokimeki Host JWT 的 ES256 私钥（private JWK JSON，含 kid）。生产：wrangler secret put。
+# **空或缺失 = Tokimeki 功能关闭**：/api/config.tokimekiEnabled=false；
+# /token、/invites*、/anon-host、/attach/cli 返回 503，/api/tokimeki/jwks.json 返回 404。
+# TOKIMEKI_RELAY_URL 另行控制命令生成与 WS 代理（空 = 不可用）。
+# 生成：node scripts/generate-tokimeki-key.mjs > tokimeki-jwk.json，再把文件内容填到等号后。
+TOKIMEKI_JWT_PRIVATE_JWK=
 
 # ---- [vars] 本地覆盖（全部可选；缺省值由 wrangler.jsonc 提供，见其注释）----
 # 前端 origin（本地 vite dev 端口）。生产必须等于管理台域 origin —— 在 wrangler.prod.jsonc 设。
@@ -68,3 +74,14 @@ BETTER_AUTH_URL=http://localhost:5173
 # SMS_TEMPLATE_CODE_RESET=100003
 # 模板变量映射（JSON；变量名以控制台实际模板为准，##code## 会被替换成本次验证码）
 # SMS_TEMPLATE_PARAM={"code":"##code##","min":"5"}
+# ---- Tokimeki（11-18-tokimeki-master-token；全部可选，缺省见 src/routes/tokimeki/lib/jwt.ts）----
+# 必须与 relay 的 TOKIMEKI_JWT_ISSUER / TOKIMEKI_JWT_AUDIENCE 一致；iss 缺省取 BETTER_AUTH_URL origin。
+# TOKIMEKI_JWT_ISSUER=
+# TOKIMEKI_JWT_AUDIENCE=tokimeki-relay
+# Host JWT 有效期（秒，缺省 2592000 = 30 天，clamp 300..7776000）
+# TOKIMEKI_JWT_TTL_SECONDS=2592000
+# relay 地址（只读展示；Web 代理与命令生成使用，不允许用户填写）
+# TOKIMEKI_RELAY_URL=wss://tokimeki-relay.example.workers.dev
+# 匿名 Host JWT 有效期（秒，缺省 86400，clamp 600..604800）。不得小于 relay 的
+# TOKIMEKI_SESSION_MAX_TTL_SECONDS（默认 86400），否则断线重连会因 JWT 过期失败。
+# TOKIMEKI_ANON_HOST_TTL_SECONDS=86400

@@ -71,7 +71,7 @@ function firstOf(arr: unknown): Record<string, unknown> {
 
 const cfg = parseJsonc(jsoncRaw);
 
-/** [vars] 白名单（23 键，design §2；与 wrangler.jsonc 逐键相等，多键少键都红）。 */
+/** [vars] 白名单（28 键，design §2；与 wrangler.jsonc 逐键相等，多键少键都红）。 */
 const VARS_WHITELIST = [
   // 11-06-sms-alicloud-auth：语义 = 自动提权名单
   "ADMIN_EMAILS",
@@ -101,6 +101,13 @@ const VARS_WHITELIST = [
   "SMS_TEMPLATE_CODE",
   "SMS_TEMPLATE_CODE_RESET",
   "SMS_TEMPLATE_PARAM",
+  // 11-18-tokimeki-getting-started：匿名 Host JWT 有效期（秒，缺省 86400）。
+  "TOKIMEKI_ANON_HOST_TTL_SECONDS",
+  // 11-18-tokimeki-master-token：非敏感配置进 [vars]；ES256 私钥仍是 secret（见 SECRET_KEY_NAMES）。
+  "TOKIMEKI_JWT_AUDIENCE",
+  "TOKIMEKI_JWT_ISSUER",
+  "TOKIMEKI_JWT_TTL_SECONDS",
+  "TOKIMEKI_RELAY_URL",
 ];
 
 /** 真实 secret 键名 —— 任何部署配置文件都不允许出现（值更不允许；红线自查）。 */
@@ -112,6 +119,8 @@ const SECRET_KEY_NAMES = [
   // 11-06-sms-alicloud-auth：阿里云 AK 对（`wrangler secret put` / .dev.vars 专用）
   "SMS_ACCESS_KEY_ID",
   "SMS_ACCESS_KEY_SECRET",
+  // 11-18-tokimeki-master-token：ES256 私钥（private JWK JSON），只走 secret put / .dev.vars
+  "TOKIMEKI_JWT_PRIVATE_JWK",
 ];
 
 const vars = cfg.vars as Record<string, string>;
@@ -137,17 +146,21 @@ describe("wrangler.jsonc（按钮形态）结构契约", () => {
     expect(queues.producers.map((p) => p.binding).sort()).toEqual(["BILLING_QUEUE", "USAGE_QUEUE"]);
   });
 
-  it("[[ratelimits]] ×2：名与 namespace_id 固定（auth-rate-limit 中间件的策略真源）", () => {
-    expect(ratelimits).toHaveLength(2);
-    expect(ratelimits.map((r) => r.name)).toEqual(["AUTH_CREDENTIAL_LIMIT", "AUTH_EMAIL_LIMIT"]);
-    expect(ratelimits.map((r) => r.namespace_id)).toEqual(["1001", "1002"]);
+  it("[[ratelimits]] ×3：名与 namespace_id 固定（auth-rate-limit 中间件的策略真源）", () => {
+    expect(ratelimits).toHaveLength(3);
+    expect(ratelimits.map((r) => r.name)).toEqual([
+      "AUTH_CREDENTIAL_LIMIT",
+      "AUTH_EMAIL_LIMIT",
+      "TOKIMEKI_ANON_LIMIT",
+    ]);
+    expect(ratelimits.map((r) => r.namespace_id)).toEqual(["1001", "1002", "1003"]);
   });
 
   it("cron 声明保留期清理（M5 5.4）", () => {
     expect(triggers.crons).toContain("0 2 * * *");
   });
 
-  it("[vars] 键集合 == 23 键白名单（多键少键都红 —— 渲染管线的键契约断言在此续命）", () => {
+  it("[vars] 键集合 == 28 键白名单（多键少键都红 —— 渲染管线的键契约断言在此续命）", () => {
     expect(Object.keys(vars).sort()).toEqual(VARS_WHITELIST);
   });
 
@@ -200,6 +213,15 @@ describe("wrangler.jsonc 安全缺省（fail-closed）", () => {
     expect(vars.SMS_AUTH_ENABLED).toBe("false");
   });
 
+  it("Tokimeki 非敏感缺省安全：issuer/relay 空、audience/TTL 固定", () => {
+    // issuer 空 = 运行时回退 BETTER_AUTH_URL origin（提交形态不写死域名）
+    expect(vars.TOKIMEKI_JWT_ISSUER).toBe("");
+    expect(vars.TOKIMEKI_JWT_AUDIENCE).toBe("tokimeki-relay");
+    expect(vars.TOKIMEKI_JWT_TTL_SECONDS).toBe("2592000");
+    // relay 空 = Tokimeki hub/命令生成在前端禁用
+    expect(vars.TOKIMEKI_RELAY_URL).toBe("");
+  });
+
   it("不含任何 lmlh.net 域名（按钮克隆形态与维护者域名零耦合）", () => {
     expect(jsoncRaw).not.toContain("lmlh.net");
   });
@@ -208,7 +230,7 @@ describe("wrangler.jsonc 安全缺省（fail-closed）", () => {
     expect(jsoncRaw).not.toMatch(/\{[A-Z][A-Z_0-9]+\}/);
   });
 
-  it("四个真实 secret 键名不出现（secrets 只走 secret put / .dev.vars）", () => {
+  it("真实 secret 键名不出现（secrets 只走 secret put / .dev.vars）", () => {
     for (const secret of SECRET_KEY_NAMES) {
       expect(jsoncRaw).not.toContain(secret);
     }

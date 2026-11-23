@@ -42,6 +42,14 @@ export default defineConfig({
           // 管理员邮箱名单（11-06-sms-alicloud-auth）：
           // pin "" = 部署缺省（无人自动提权）；admin-emails.test.ts 用 withAdminEmails 运行时翻转。
           ADMIN_EMAILS: "",
+          // Tokimeki（11-18-tokimeki-master-token）：全部 pin 成**未配置**（私钥空 = 功能关闭）。
+          // 用例用 helpers.withSwitch 注入测试密钥 / 翻 TTL；未被 pin 的键无法保证可写。
+          TOKIMEKI_JWT_PRIVATE_JWK: "",
+          TOKIMEKI_JWT_ISSUER: "",
+          TOKIMEKI_JWT_AUDIENCE: "",
+          TOKIMEKI_JWT_TTL_SECONDS: "",
+          TOKIMEKI_RELAY_URL: "",
+          TOKIMEKI_ANON_HOST_TTL_SECONDS: "",
           // 全局缓存总开关（09-03-stg-cache-investigation）：测试固定开启（cache.test.ts 依赖缓存生效）
           CACHE_ENABLED: "true",
           // modelcap 档位乘算常数：测试固定缺省基准（8192 × 2 → 档位 1 = 16384）

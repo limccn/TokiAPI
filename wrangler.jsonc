@@ -71,7 +71,10 @@
   // 不同用户各自部署到各自账号，同值不互撞；改档位改这里即可，不用改代码、不用发版。
   "ratelimits": [
     { "name": "AUTH_CREDENTIAL_LIMIT", "namespace_id": "1001", "simple": { "limit": 10, "period": 60 } },
-    { "name": "AUTH_EMAIL_LIMIT", "namespace_id": "1002", "simple": { "limit": 5, "period": 60 } }
+    { "name": "AUTH_EMAIL_LIMIT", "namespace_id": "1002", "simple": { "limit": 5, "period": 60 } },
+    // Tokimeki 匿名 host 签发（11-18-tokimeki-getting-started）：独立桶，避免公开端点
+    // 放大 Host JWT/invite 写入；period 仍只能是 10/60。
+    { "name": "TOKIMEKI_ANON_LIMIT", "namespace_id": "1003", "simple": { "limit": 10, "period": 60 } }
   ],
 
   // --- Queues：用量聚合 + 延迟计费异步管道（M5 / 08-31-perf-v2）---
@@ -96,8 +99,8 @@
     "crons": ["0 2 * * *"]
   },
 
-  // --- 非敏感运行时配置（23 键，安全缺省）---
-  // 治理规则：四个真实 secret（名单见 .dev.vars.example 与 README 部署章节）**绝不进本文件**，
+  // --- 非敏感运行时配置（28 键，安全缺省）---
+  // 治理规则：真实 secret（名单见 .dev.vars.example 与 README 部署章节）**绝不进本文件**，
   // 只走 `.dev.vars`（一键部署 setup 页输入项通道）或
   // `wrangler secret put`。个性化值（BETTER_AUTH_URL / GITHUB_CLIENT_ID / ADMIN_EMAILS）
   // 双通道：本文件缺省 + `.dev.vars.example`（setup 页输入）；一键部署输入值的落盘形态是文档盲区，
@@ -146,6 +149,21 @@
     // 公开 API 域名（双域名分流）：**空 = 分流整体关闭** = 单一 workers.dev 域的正确形态。
     // 自定义双域名的部署方在部署后填写（并同时于 dashboard 绑定该域名）。
     "API_DOMAIN": "",
+
+    // ---- Tokimeki（11-18-tokimeki-master-token；非敏感项，私钥走 wrangler secret）----
+    // JWT aud：必须与 relay 的 TOKIMEKI_JWT_AUDIENCE 一致。
+    "TOKIMEKI_JWT_AUDIENCE": "tokimeki-relay",
+    // JWT iss：空 = 运行时回退 BETTER_AUTH_URL 的 origin（不把域名写进提交形态）。
+    "TOKIMEKI_JWT_ISSUER": "",
+    // Host JWT 有效期（秒；缺省 2592000 = 30 天，代码侧 clamp 300..7776000）。
+    "TOKIMEKI_JWT_TTL_SECONDS": "2592000",
+    // relay 地址（只读展示；空 = Tokimeki hub/命令生成在前端禁用）。
+    // 🔴 ES256 私钥是真实 secret，只走 wrangler secret put / .dev.vars，不得出现在本文件（含注释）
+    //    ——tests/config-fork.test.ts 按 secret 键名字符串扫描。
+    "TOKIMEKI_RELAY_URL": "",
+    // 匿名 Host JWT 有效期（秒；缺省 86400，clamp 600..604800）。不得小于 relay 的
+    // TOKIMEKI_SESSION_MAX_TTL_SECONDS（默认 86400），否则断线重连会因 JWT 过期失败。
+    "TOKIMEKI_ANON_HOST_TTL_SECONDS": "86400",
 
     // ---- 短信认证（11-06-sms-alicloud-auth；阿里云「短信认证」dypnsapi）----
     // 总开关：缺省 false = phone-number 插件**整段不注册**（端点 404、UI 入口消失），

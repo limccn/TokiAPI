@@ -37,6 +37,14 @@ import settingsRouter from "./routes/settings/router";
 import billingRouter from "./routes/billing/router";
 import onboardingRouter from "./routes/onboarding/router";
 import profileRouter from "./routes/profile/router";
+import tokimekiRouter from "./routes/tokimeki/router";
+import { jwksHandler } from "./routes/tokimeki/procedures/jwks";
+import { isTokimekiConfigured } from "./routes/tokimeki/lib/jwt";
+import { runTokimekiCleanup } from "./routes/tokimeki/lib/invites";
+import { anonHostHandler } from "./routes/tokimeki/procedures/anon-host";
+import { attachHandler } from "./routes/tokimeki/public/attach";
+import { attachCliHandler } from "./routes/tokimeki/public/attach-cli";
+import { wsHandler } from "./routes/tokimeki/public/ws";
 import { toUnifiedErrorBody } from "./lib/error-format";
 import { logger } from "./lib/logger";
 import { consumeUsageBatch } from "./lib/usage-aggregation";
@@ -101,6 +109,10 @@ app.get("/api/config", (c) => {
     // 前端无法靠「试一下」发现，只能由本字段告知。解析点唯一（isSmsAuthEnabled），
     // 本文件不得写 env.SMS_AUTH_ENABLED === "true"（两处解析必然漂移）。
     smsAuthEnabled: isSmsAuthEnabled(c.env.SMS_AUTH_ENABLED),
+    // Tokimeki（11-18-tokimeki-master-token）：私钥未配置时整组功能关闭，
+    // 前端据此隐藏创建入口；relay 地址只读展示，不允许用户填写（SSRF 边界）。
+    tokimekiEnabled: isTokimekiConfigured(c.env),
+    tokimekiRelayUrl: c.env.TOKIMEKI_RELAY_URL?.trim() ?? "",
   });
 });
 
@@ -127,9 +139,24 @@ app.route("/v1", v1Router);
 // router 内部挂 x-api-key 兼容鉴权 + Anthropic 错误形态重写；/v1/messages 别名在 v1Router 内
 app.route("/anthropic", anthropicRouter);
 
+// Tokimeki JWKS（11-18-tokimeki-master-token）：**公开**端点，必须注册在 requireSession 之前。
+// relay 只会拉公钥；私钥不进响应。未配置私钥时返回 404（功能整体关闭）。
+app.get("/api/tokimeki/jwks.json", jwksHandler);
+
+// Tokimeki 公开 attach 面（11-18-tokimeki-share-link-attach）：share link 的 code
+// 即能力，访问者无需登录；必须注册在 requireSession / requireVerifiedPhone 之前。
+// attach 与 attach/cli 复用 credential 限流桶（10 次/60s/IP）。
+// One middleware for the whole subtree; `authRateLimit()` only counts paths in
+// its own whitelist, so session-only invite endpoints are unaffected.
+app.use("/api/tokimeki/*", authRateLimit());
+app.post("/api/tokimeki/attach", attachHandler);
+app.post("/api/tokimeki/attach/cli", attachCliHandler);
+app.get("/api/tokimeki/ws", wsHandler);
+// 匿名 host 签发（11-18-tokimeki-getting-started）：公开、独立限流、无会话。
+app.post("/api/tokimeki/anon-host", anonHostHandler);
+
 // 管理面 API：全部要求会话
 app.use("/api/*", requireSession());
-
 // 手机号硬门禁（11-06-sms-alicloud-auth，PRD R19 / design §13.4）：**必须在 requireSession 之后**
 // （依赖它注入的 user/userId），且在管理面模块路由之前。开关关闭时直接放行（部署缺省 = 无门禁）。
 // 上面已注册的 /api/health、/api/config、/api/auth/*、/api/invites/validate 不受影响；
@@ -146,6 +173,7 @@ app.route("/api", settingsRouter); // /api/admin/settings（admin 只读）
 app.route("/api", billingRouter); // /api/me/transactions（member）、/api/admin/transactions（admin）
 app.route("/api", onboardingRouter); // /api/me/onboarding（member：首登欢迎状态 / 标记已读）
 app.route("/api", profileRouter); // /api/me/profile（member：账号资料只读，改 name 走 /api/auth/update-user）
+app.route("/api/tokimeki", tokimekiRouter); // /api/tokimeki/token、/api/tokimeki/tokens（member/admin 本人）
 
 // notFound 兜底（M6）：API 路径保持 JSON 404；其余路径（SPA 深链/静态资源）交给 Workers Assets。
 // run_worker_first=true 下 Worker 先收到全部请求，这里对非 API 路径回落到 env.ASSETS.fetch，
@@ -223,7 +251,10 @@ export async function scheduled(
   _ctx: ExecutionContext,
 ): Promise<void> {
   const retentionDays = parseRetentionDays(env.REQUEST_LOG_RETENTION_DAYS);
-  await runRequestLogCleanup(createDb(env), retentionDays, logger);
+  const db = createDb(env);
+  await runRequestLogCleanup(db, retentionDays, logger);
+  const cleaned = await runTokimekiCleanup(db);
+  logger.info("tokimeki_cleanup", cleaned);
 }
 
 export default {

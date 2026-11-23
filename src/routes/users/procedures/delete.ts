@@ -1,7 +1,7 @@
 // DELETE /api/users/:id — 硬删除用户（admin）+ 应用层级联清理。
 // 防护：不允许删除自己或任何其他 admin（先降级再删）；级联经 D1 batch 原子提交
 // （batch = 隐式事务，全成全败），父表 users 最后删除（FK 强制约束，无 ON DELETE CASCADE）。
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { zValidator } from "@hono/zod-validator";
 import { HTTPException } from "hono/http-exception";
 import type { Hono } from "hono";
@@ -13,6 +13,9 @@ import {
   inviteCodes,
   requestLogs,
   sessions,
+  tokimekiAttachTickets,
+  tokimekiInvites,
+  tokimekiTokens,
   usageDaily,
   users,
 } from "../../../db/schema";
@@ -56,6 +59,20 @@ export function deleteUserRoute(app: Hono<AppEnv>): void {
       db.delete(sessions).where(eq(sessions.userId, existing.id)),
       db.delete(accounts).where(eq(accounts.userId, existing.id)),
       db.delete(inviteCodes).where(eq(inviteCodes.createdBy, existing.id)),
+      // Tokimeki invites: tickets first (FK topology), then invites.
+      db
+        .delete(tokimekiAttachTickets)
+        .where(
+          inArray(
+            tokimekiAttachTickets.inviteId,
+            db
+              .select({ id: tokimekiInvites.id })
+              .from(tokimekiInvites)
+              .where(eq(tokimekiInvites.createdBy, existing.id)),
+          ),
+        ),
+      db.delete(tokimekiInvites).where(eq(tokimekiInvites.createdBy, existing.id)),
+      db.delete(tokimekiTokens).where(eq(tokimekiTokens.userId, existing.id)),
       db.delete(apiKeys).where(eq(apiKeys.userId, existing.id)),
       db.delete(users).where(eq(users.id, existing.id)),
     ]);

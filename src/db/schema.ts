@@ -75,9 +75,18 @@ export const users = sqliteTable(
       .default(true),
     // 首次登录欢迎弹窗标记（09-16-signup-bonus-onboarding C2 使用；本任务只建列，不写不改）
     welcomeSeenAt: integer("welcome_seen_at", { mode: "timestamp" }),
+    // 命名空间（11-18-tokimeki-master-token）：公开标识，不是权限边界。
+    // namespace_short 是完整 id 的前 5 位（session 前缀 / JWT `namespace` claim）；
+    // 两列均 nullable：D1 迁移无法在 SQL 内做「随机 + 唯一 + 重试」，由应用层懒生成回填。
+    namespaceId: text("namespace_id"),
+    namespaceShort: text("namespace_short"),
     ...timestamps,
   },
-  (table) => [index("users_email_idx").on(table.email)],
+  (table) => [
+    index("users_email_idx").on(table.email),
+    uniqueIndex("users_namespace_id_unique").on(table.namespaceId),
+    uniqueIndex("users_namespace_short_unique").on(table.namespaceShort),
+  ],
 );
 
 // --- Better Auth session 表 ---
@@ -404,6 +413,86 @@ export const models = sqliteTable(
   (table) => [index("models_model_idx").on(table.model)],
 );
 
+// --- Tokimeki master token 元数据（11-18-tokimeki-master-token）---
+// 只记录「签发过」这件事与展示所需字段；不存 JWT 明文（JWT 是一次性响应的凭证），
+// 也不存私钥。ES256 无撤销列表 —— 删除本行不会让已签发的 JWT 失效，UI 必须明示。
+export const tokimekiTokens = sqliteTable(
+  "tokimeki_tokens",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id),
+    name: text("name").notNull(),
+    /** JWT `jti`（展示用短前缀即可定位；完整值仅用于审计关联）。 */
+    jti: text("jti").notNull().unique(),
+    /** 签发时使用的密钥版本，便于轮换排查。 */
+    kid: text("kid").notNull(),
+    /** 签发时的 namespace 短 id 快照（namespace 未来允许变更，历史 token 保持原值）。 */
+    namespace: text("namespace").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    index("tokimeki_tokens_user_id_idx").on(table.userId),
+    index("tokimeki_tokens_expires_at_idx").on(table.expiresAt),
+  ],
+);
+
+// --- Tokimeki invite 与一次性 attach ticket（11-18-tokimeki-share-link-attach）---
+// invite code 只在创建响应中出现一次；DB 只存 SHA-256 哈希，撤销/生成 CLI 凭证用行 id。
+// 匿名 invite 的 created_by 为 NULL（任务 3 的 anon-host）。
+export const tokimekiInvites = sqliteTable(
+  "tokimeki_invites",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    /** sha256(invite code) hex；code 不落库。 */
+    codeHash: text("code_hash").notNull().unique(),
+    /** NULL = 匿名 host（任务 3）。 */
+    createdBy: integer("created_by").references(() => users.id),
+    /** 创建者 namespace_short（session 前缀）。 */
+    namespace: text("namespace").notNull(),
+    /** `<namespace>.<slug>`。 */
+    session: text("session").notNull(),
+    /** viewer（可输入）| listener（只读）。 */
+    mode: text("mode").notNull(),
+    allowWeb: integer("allow_web", { mode: "boolean" }).notNull().default(true),
+    /** 可选会话 passcode（v1.2-D）；不含 passcode 本身。 */
+    passcodeRequired: integer("passcode_required", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+    revokedAt: integer("revoked_at", { mode: "timestamp" }),
+  },
+  (table) => [
+    index("tokimeki_invites_created_by_idx").on(table.createdBy, table.createdAt),
+    index("tokimeki_invites_expires_at_idx").on(table.expiresAt),
+  ],
+);
+
+// 一次性 WebSocket attach ticket：60s、HttpOnly cookie、单条 UPDATE 原子消费。
+export const tokimekiAttachTickets = sqliteTable(
+  "tokimeki_attach_tickets",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    ticketHash: text("ticket_hash").notNull().unique(),
+    inviteId: integer("invite_id")
+      .notNull()
+      .references(() => tokimekiInvites.id),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+    consumedAt: integer("consumed_at", { mode: "timestamp" }),
+  },
+  (table) => [index("tokimeki_attach_tickets_expires_at_idx").on(table.expiresAt)],
+);
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
@@ -426,3 +515,9 @@ export type UsageDaily = typeof usageDaily.$inferSelect;
 export type NewUsageDaily = typeof usageDaily.$inferInsert;
 export type Model = typeof models.$inferSelect;
 export type NewModel = typeof models.$inferInsert;
+export type TokimekiToken = typeof tokimekiTokens.$inferSelect;
+export type NewTokimekiToken = typeof tokimekiTokens.$inferInsert;
+export type TokimekiInvite = typeof tokimekiInvites.$inferSelect;
+export type NewTokimekiInvite = typeof tokimekiInvites.$inferInsert;
+export type TokimekiAttachTicket = typeof tokimekiAttachTickets.$inferSelect;
+export type NewTokimekiAttachTicket = typeof tokimekiAttachTickets.$inferInsert;

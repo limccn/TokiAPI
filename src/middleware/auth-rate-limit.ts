@@ -29,8 +29,11 @@
 import type { MiddlewareHandler } from "hono";
 import type { AppEnv } from "../types";
 
-/** 桶标识：credential = 凭据提交类；email = 匿名可打且会外发邮件 / 消耗外部资源的端点。 */
-export type AuthRateLimitBucket = "credential" | "email";
+/**
+ * 桶标识：credential = 凭据提交类；email = 匿名可打且会外发邮件 / 消耗外部资源的端点；
+ * tokimeki-anon = 公开的匿名 Host JWT + invite 签发（每次写 D1 + 签 JWT，独立限额）。
+ */
+export type AuthRateLimitBucket = "credential" | "email" | "tokimeki-anon";
 
 /**
  * 完整请求路径 → 桶（**全路径**白名单）。
@@ -65,6 +68,12 @@ const BUCKET_BY_PATH: ReadonlyMap<string, AuthRateLimitBucket> = new Map([
   // 按「凭据猜测」口径压进 credential 桶：复用 AUTH_CREDENTIAL_LIMIT binding ⇒ 零配置改动。
   // 与登录共享计数（校验 1 次 + 登录 ≤9 次每分钟）—— 副作用已由 prd D30 认可。
   ["/api/invites/validate", "credential"],
+  // Tokimeki share-link attach（11-18-tokimeki-share-link-attach）：公开、code 即能力。
+  // 与登录共享 credential 桶（NAT 后多人同时打开可能误伤；design 已记录为已知限制）。
+  ["/api/tokimeki/attach", "credential"],
+  ["/api/tokimeki/attach/cli", "credential"],
+  // 11-18-tokimeki-getting-started：匿名 host 签发独立桶（10 次/60s/IP）。
+  ["/api/tokimeki/anon-host", "tokimeki-anon"],
 ]);
 
 /** 纯函数：请求路径落在哪个桶；不在白名单内则 `null`（导出供单测直接锁路径表）。 */
@@ -76,7 +85,11 @@ export function authRateLimitBucket(path: string): AuthRateLimitBucket | null {
 const BINDING_BY_BUCKET = {
   credential: "AUTH_CREDENTIAL_LIMIT",
   email: "AUTH_EMAIL_LIMIT",
-} as const satisfies Record<AuthRateLimitBucket, keyof Pick<Env, "AUTH_CREDENTIAL_LIMIT" | "AUTH_EMAIL_LIMIT">>;
+  "tokimeki-anon": "TOKIMEKI_ANON_LIMIT",
+} as const satisfies Record<
+  AuthRateLimitBucket,
+  keyof Pick<Env, "AUTH_CREDENTIAL_LIMIT" | "AUTH_EMAIL_LIMIT" | "TOKIMEKI_ANON_LIMIT">
+>;
 
 /**
  * 429 的 `Retry-After` 秒数，与配置的 `period = 60` 对齐。

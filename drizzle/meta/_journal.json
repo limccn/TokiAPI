@@ -113,6 +113,20 @@
       "when": 1794131770179,
       "tag": "0015_gifted_killmonger",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1795067387223,
+      "tag": "0016_chilly_forge",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1795101526890,
+      "tag": "0017_wise_blackheart",
+      "breakpoints": true
     }
   ]
 }

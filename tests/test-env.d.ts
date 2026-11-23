@@ -36,6 +36,16 @@ declare namespace Cloudflare {
     /** 网关 API Key 明文前缀（缺省 "sk-"；空白视为未设置，回退默认）。 */
     API_KEY_PREFIX?: string;
     /**
+     * Tokimeki（11-18-tokimeki-master-token）。私钥未 pin（缺省未配置 = 功能关闭）；
+     * 用例用 withSwitch / 直接赋值注入测试密钥。全部可选，与 src/env.d.ts 一致。
+     */
+    TOKIMEKI_JWT_PRIVATE_JWK?: string;
+    TOKIMEKI_JWT_ISSUER?: string;
+    TOKIMEKI_JWT_AUDIENCE?: string;
+    TOKIMEKI_JWT_TTL_SECONDS?: string;
+    TOKIMEKI_RELAY_URL?: string;
+    TOKIMEKI_ANON_HOST_TTL_SECONDS?: string;
+    /**
      * 账户安全总开关（09-21-email-admin-promotion-switch）。vitest.config.ts pin "false"（部署缺省）；
      * helpers.withSwitch 运行时改写它来覆盖开启态，故这里**必须**声明 —— 本文件是 Cloudflare.Env 的
      * 平行声明，漏一处会让「运行时能跑、类型检查报错」（src/env.d.ts 管不到 cloudflare:test 的 env）。
@@ -98,6 +108,7 @@ declare namespace Cloudflare {
      */
     AUTH_CREDENTIAL_LIMIT?: RateLimit;
     AUTH_EMAIL_LIMIT?: RateLimit;
+    TOKIMEKI_ANON_LIMIT?: RateLimit;
     /**
      * 维护者生产 fork（wrangler.prod.jsonc，gitignored）的**原文**，vitest.config.ts 在 Node 侧读取
      * 后注入；空串 = fork 不存在（裸仓库 clone），tests/config-fork.test.ts 的 prod-fork 组据此跳过。

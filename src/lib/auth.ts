@@ -60,6 +60,7 @@ import {
 import { sendMail, verificationEmail } from "./email";
 import { consumeInviteCode, validateInviteCode } from "./invites";
 import { logger } from "./logger";
+import { ensureNamespace } from "./namespace";
 import { MIN_PASSWORD_LENGTH } from "./password";
 import {
   SMS_CODE_TTL_SECONDS,
@@ -315,6 +316,18 @@ export function createAuth(env: Env, db: Db) {
             const email = typeof user.email === "string" ? user.email : "";
             if (Number.isInteger(userId) && userId > 0 && email !== "") {
               await promoteAdminIfListed(env, db, { id: userId, email });
+            }
+            // 命名空间（11-18-tokimeki-master-token）：建号即分配，失败不阻断注册
+            //（存量用户另有懒回填，见 src/lib/namespace.ts）。
+            if (Number.isInteger(userId) && userId > 0) {
+              try {
+                await ensureNamespace(db, userId);
+              } catch (error) {
+                logger.warn("namespace_assign_failed", {
+                  userId,
+                  message: error instanceof Error ? error.message : String(error),
+                });
+              }
             }
           },
         },
