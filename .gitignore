@@ -29,6 +29,10 @@ scripts/ui-audit/
 .agents/
 .claude/
 .codex/
+.codebuddy/
+.cursor/
+.opencode/
+.pi/
 .cache/
 
 AGENTS.md

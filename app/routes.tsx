@@ -9,6 +9,7 @@ import { AppLayout } from "@/components/layout/app-layout";
 import { RequireAdmin } from "@/components/layout/require-admin";
 import { MarketingLayout } from "@/components/marketing/marketing-layout";
 import { PageLoading } from "@/components/ui/states";
+import { useHash } from "@/hooks/use-hash";
 
 function lazyPage(loader: () => Promise<{ default: ComponentType }>) {
   const Component = lazy(loader);
@@ -19,16 +20,32 @@ function lazyPage(loader: () => Promise<{ default: ComponentType }>) {
   );
 }
 
+/**
+ * Root entry: `#t-<code>` renders the standalone Tokimeki terminal (no
+ * marketing chrome); every other hash/path falls through to MarketingLayout.
+ */
+function RootEntry() {
+  const hash = useHash();
+  if (hash.startsWith("#t-")) {
+    return lazyPage(() => import("@/modules/tokimeki/viewer/terminal-page"));
+  }
+  return <MarketingLayout />;
+}
+
 export const router = createBrowserRouter([
   // 公开营销面（/ 与 /docs）：不经认证守卫，未登录直接可见。
   // index 精确匹配 `/`，不会吞掉 /login、/register 等同级静态路径（design.md §2 风险 1）。
   {
-    element: <MarketingLayout />,
+    element: <RootEntry />,
     children: [
       { index: true, element: lazyPage(() => import("@/routes/home")) },
       { path: "docs", element: lazyPage(() => import("@/routes/docs")) },
     ],
   },
+
+  // Tokimeki 公开 Hub（11-18-tokimeki-getting-started）：未登录可走匿名 Host 流程，
+  // 因此**不能**放进 AppLayout（未登录会被重定向到 /login）。
+  { path: "tokimeki", element: lazyPage(() => import("@/routes/tokimeki-home")) },
 
   // 认证页（public；已登录时内部重定向到 /dashboard）
   { path: "/login", element: lazyPage(() => import("@/routes/login")) },
@@ -56,6 +73,10 @@ export const router = createBrowserRouter([
       // Add price / 两个行控制 / Actions 列由 useSession 的角色判断自行收敛。写操作的
       // 真防线在后端 router.ts，不在这一层。
       { path: "models", element: lazyPage(() => import("@/routes/models")) },
+      // Tokimeki（11-18-tokimeki-master-token）：P2 IA 的 tokens 子页；`/tokimeki` hub 由
+      // 11-18-tokimeki-getting-started 补齐，届时导航目标改为 hub。
+      { path: "tokimeki/tokens", element: lazyPage(() => import("@/routes/tokimeki-tokens")) },
+      { path: "tokimeki/sessions", element: lazyPage(() => import("@/routes/tokimeki-sessions")) },
       {
         path: "users",
         element: <RequireAdmin>{lazyPage(() => import("@/routes/users"))}</RequireAdmin>,

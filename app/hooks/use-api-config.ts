@@ -17,6 +17,10 @@ export interface ApiConfig {
    * （端点 404），所以**不能**靠调用失败来发现 —— 登录页/注册页/找回密码入口一律先读本字段。
    */
   smsAuthEnabled: boolean;
+  /** Tokimeki 功能是否可用（11-18-tokimeki-master-token）。私钥未配置时为 false。 */
+  tokimekiEnabled: boolean;
+  /** Tokimeki relay 地址（只读展示；未配置为空串）。 */
+  tokimekiRelayUrl: string;
 }
 
 /** GET /api/config —— 公开端点（无需会话），故无需 enabled 门控。 */

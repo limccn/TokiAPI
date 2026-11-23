@@ -11,5 +11,11 @@
     // 只影响 tests 这一侧，且 noEmit 已开 —— 不产出、不改变运行时。
     "allowJs": true
   },
-  "include": ["tests", "src/env.d.ts", "worker-configuration.d.ts"]
+  "include": ["tests", "src/env.d.ts", "worker-configuration.d.ts"],
+  // The viewer e2e test imports the DOM-facing client.ts; it is typechecked by
+  // tsconfig.viewer-test.json (DOM libs) instead of the worker-types project.
+  "exclude": [
+    "tests/tokimeki-viewer-e2e.test.ts",
+    "tests/tokimeki-viewer-passcode.unit.test.ts"
+  ]
 }

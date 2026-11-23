@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": []
+  },
+  "include": [
+    "tests/tokimeki-viewer-e2e.test.ts",
+    "tests/tokimeki-viewer-passcode.unit.test.ts",
+    "app/modules/tokimeki/viewer/client.ts",
+    "app/modules/tokimeki/viewer/display.ts"
+  ]
+}

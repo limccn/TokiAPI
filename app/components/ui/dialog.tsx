@@ -155,6 +155,7 @@ export function Dialog({
           <Button
             variant="ghost"
             size="icon"
+            className="shrink-0"
             onClick={() => onOpenChange(false)}
             aria-label="Close dialog"
           >
