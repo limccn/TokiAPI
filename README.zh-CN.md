@@ -62,7 +62,8 @@ TokiAPI 是一个自托管的 AI API 网关。它把**一个 OpenAI 兼容端点
 - **预付费计费。** 按 token 计价，余额可见；失败的请求不计费。
 - **限流与响应缓存。** 超额请求自动拒绝；重复的非流式请求可由边缘缓存直接返回。
 - **分享实时终端（可选）。** Tokimeki 集成可签发 Host/Session JWT、一次性分享链接，并为运行中的
-  `tokimeki` 会话提供仅走 relay 的浏览器终端。
+  `tokimeki` 会话提供仅走 relay 的浏览器终端。Hub 入口：**<https://tokiapi.app/tokimeki>**；
+  使用文档：**<https://tokiapi.app/docs#tokimeki>**。
 - **管理台。** 用量报表、密钥、成员、供应商、模型价格与账户设置集中在一处。
 - **数据留在自己的账号。** 用户、密钥、价格、余额与请求日志都在你自己的 Cloudflare D1/KV 资源里。
 
@@ -71,6 +72,9 @@ TokiAPI 是一个自托管的 AI API 网关。它把**一个 OpenAI 兼容端点
 托管实例运行在 **<https://tokiapi.app>**，API 地址为
 **<https://api.tokiapi.app/v1>**（OpenAI 兼容）与 **<https://api.tokiapi.app/anthropic>**
 （Anthropic 原生）。
+
+Tokimeki 终端分享 Hub 位于 **<https://tokiapi.app/tokimeki>**，使用文档见
+**<https://tokiapi.app/docs#tokimeki>**。
 
 邮箱密码与手机号注册需要邀请码；GitHub 登录开放。该实例面向评估用途：不提供 SLA，容量有限，
 请勿通过共享实例提交敏感数据。
@@ -277,10 +281,13 @@ rm tokimeki-jwk.json
 | `TOKIMEKI_JWT_AUDIENCE` | `tokimeki-relay` | 必须与 relay 一致 |
 | `TOKIMEKI_JWT_TTL_SECONDS` | `2592000` | 登录 Host JWT 有效期（clamp 300..7776000） |
 
-relay 必须是 v1.2 构建，支持 Host JWT 与 Session JWT 验签（`TOKIMEKI_JWT_JWKS_URL` 指向本
-部署）。静态 `TOKIMEKI_MASTER_TOKEN` 仅作为 relay 的单人独占回退，TokiAPI 不存储也不签发它。
+relay 必须是 **0.1.4+** 构建（Tokimeki v1.2 JWT 线），支持 Host JWT 与 Session JWT 验签
+（`TOKIMEKI_JWT_JWKS_URL` 指向本部署）。静态 `TOKIMEKI_MASTER_TOKEN` 仅作为 relay 的单人独占
+回退，TokiAPI 不存储也不签发它。
 
 #### 页面与流程
+
+终端用户操作走查见 **<https://tokiapi.app/docs#tokimeki>**。
 
 - **`/tokimeki`** — 公开 Hub，三步向导式流程。第一步展示安装命令（`npm install -g
   @limccn/tokimeki@latest`）与 "Skip next time" 开关（cookie 记忆，下次直达第二步）。第二步
@@ -620,6 +627,17 @@ const message = await anthropic.messages.create({
 ```
 
 `Authorization: Bearer` 与 Anthropic 原生的 `x-api-key` 两种头都被接受。
+
+### 客户端版本
+
+2026-11-20 最后实测：Claude Code **2.1.329**、Codex CLI **0.171.0**。
+
+- **Claude Code 2.1.207+** —— [版本表](https://tokiapi.app/docs#claude-code)。服务端 auto mode 与
+  message threads 需要 Anthropic 方言上游；OpenAI 方言上游请设
+  `CLAUDE_CODE_AUTO_MODE_SERVER=0`。
+- **Codex CLI 0.113+** —— [版本表](https://tokiapi.app/docs#codex-cli)。请用
+  `wire_api = "responses"`；Responses Lite（0.149+）已自动适配。Responses 保持无状态
+  （拒绝 `previous_response_id` / `conversation`），convert 路径下配对的服务端工具项会显式降级。
 
 ### Claude Code auto mode
 

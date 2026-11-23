@@ -4,3 +4,6 @@ export const GITHUB_URL = "https://github.com/limccn/TokiAPI";
 
 /** 部署与运维细节的落点 —— 产品文档页不重复 README 的内容。 */
 export const GITHUB_README_URL = `${GITHUB_URL}#readme`;
+
+/** README 的 Tokimeki relay 部署小节（/docs 只列启用所需变量，全表外链此处）。 */
+export const GITHUB_README_TOKIMEKI_URL = `${GITHUB_URL}#tokimeki-relay-integration-optional`;

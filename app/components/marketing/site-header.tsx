@@ -1,5 +1,5 @@
 // 公开页顶栏（/ 与 /docs 共用；design.md §3/§6）。
-// 左：品牌（→ /）+ [docs]；右：GitHub 外链 + 登录态入口（Sign in/Register 或 Dashboard）。
+// 左：品牌（→ /）+ [docs] + [tokimeki]；右：GitHub 外链 + 登录态入口（Sign in/Register 或 Dashboard）。
 // 无 <a><button> 嵌套：链接一律用 <Link>/<a> + buttonVariants。
 import { ArrowUpRight, ShieldCheck } from "lucide-react";
 import { Link, NavLink } from "react-router";
@@ -8,29 +8,32 @@ import { GITHUB_URL } from "@/lib/site-links";
 import { cn } from "@/lib/utils";
 import type { MarketingChromeProps } from "./types";
 
+/** 两个公开文档入口共用同一套 active / hover 样式，避免两处漂移。 */
+function headerNavLinkClass({ isActive }: { isActive: boolean }): string {
+  return cn(
+    "rounded-sm px-1 py-1 font-mono text-sm transition-colors",
+    isActive ? "text-brand" : "text-muted-foreground hover:text-foreground",
+  );
+}
+
 export function SiteHeader({ sessionReady, signedIn }: MarketingChromeProps) {
   return (
     <header className="sticky top-0 z-40 border-b bg-background/85 backdrop-blur">
-      <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between gap-4 px-5 sm:px-6">
-        <div className="flex min-w-0 items-center gap-3">
+      <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-1 px-5 py-2 sm:h-14 sm:flex-nowrap sm:gap-4 sm:px-6 sm:py-0">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           <Link to="/" className="flex items-center gap-2">
             <ShieldCheck className="size-5 shrink-0 text-brand" aria-hidden="true" />
             <span className="text-sm font-semibold tracking-tight">TokiAPI</span>
           </Link>
-          <NavLink
-            to="/docs"
-            className={({ isActive }) =>
-              cn(
-                "rounded-sm px-1 py-1 font-mono text-sm transition-colors",
-                isActive ? "text-brand" : "text-muted-foreground hover:text-foreground",
-              )
-            }
-          >
+          <NavLink to="/docs" className={headerNavLinkClass}>
             [docs]
+          </NavLink>
+          <NavLink to="/tokimeki" className={headerNavLinkClass}>
+            [tokimeki]
           </NavLink>
         </div>
 
-        <nav aria-label="Site" className="flex items-center gap-1 sm:gap-2">
+        <nav aria-label="Site" className="ml-auto flex items-center gap-1 sm:gap-2">
           <a
             href={GITHUB_URL}
             target="_blank"
