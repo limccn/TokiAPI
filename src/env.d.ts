@@ -135,4 +135,6 @@ interface Env {
   AUTH_EMAIL_LIMIT?: RateLimit;
   // 11-18-tokimeki-getting-started：匿名 host 签发独立桶（每次签发 JWT + 写 invite）。
   TOKIMEKI_ANON_LIMIT?: RateLimit;
+  // v1.7 R4: browser WebSocket proxy bucket (30/60s/IP); optional/fail-open.
+  TOKIMEKI_WS_LIMIT?: RateLimit;
 }

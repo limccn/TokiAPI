@@ -146,14 +146,15 @@ describe("wrangler.jsonc（按钮形态）结构契约", () => {
     expect(queues.producers.map((p) => p.binding).sort()).toEqual(["BILLING_QUEUE", "USAGE_QUEUE"]);
   });
 
-  it("[[ratelimits]] ×3：名与 namespace_id 固定（auth-rate-limit 中间件的策略真源）", () => {
-    expect(ratelimits).toHaveLength(3);
+  it("[[ratelimits]] ×4：名与 namespace_id 固定（auth-rate-limit 中间件的策略真源）", () => {
+    expect(ratelimits).toHaveLength(4);
     expect(ratelimits.map((r) => r.name)).toEqual([
       "AUTH_CREDENTIAL_LIMIT",
       "AUTH_EMAIL_LIMIT",
       "TOKIMEKI_ANON_LIMIT",
+      "TOKIMEKI_WS_LIMIT",
     ]);
-    expect(ratelimits.map((r) => r.namespace_id)).toEqual(["1001", "1002", "1003"]);
+    expect(ratelimits.map((r) => r.namespace_id)).toEqual(["1001", "1002", "1003", "1004"]);
   });
 
   it("cron 声明保留期清理（M5 5.4）", () => {

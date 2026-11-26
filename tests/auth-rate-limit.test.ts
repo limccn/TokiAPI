@@ -38,6 +38,11 @@ const IP_D = "203.0.113.4";
 const IP_E = "203.0.113.5";
 const IP_F = "203.0.113.6";
 const IP_G = "203.0.113.7";
+const IP_H = "203.0.113.8";
+const IP_I = "203.0.113.9";
+
+/** v1.7 R4 browser WS proxy bucket limit (wrangler TOKIMEKI_WS_LIMIT). */
+const TOKIMEKI_WS_LIMIT = 30;
 
 const PROBE_EMAIL = "ratelimit-probe@test.dev";
 
@@ -128,6 +133,13 @@ describe("authRateLimitBucket — 路径→桶映射（纯函数）", () => {
     expect(authRateLimitBucket("/api/auth/phone-number")).toBeNull();
     expect(authRateLimitBucket("/api/auth/phone-number/send-otp/extra")).toBeNull();
     expect(authRateLimitBucket("/api/auth/phone-number/verify/2")).toBeNull();
+  });
+
+  it("v1.7 R4：/api/tokimeki/ws 落独立 tokimeki-ws 桶", () => {
+    expect(authRateLimitBucket("/api/tokimeki/ws")).toBe("tokimeki-ws");
+    // 全路径匹配：相似路径不命中。
+    expect(authRateLimitBucket("/api/tokimeki/ws/extra")).toBeNull();
+    expect(authRateLimitBucket("/api/tokimeki/ws2")).toBeNull();
   });
 
   it("未列举端点一律 null（不限流也不耗配额）", () => {
@@ -234,6 +246,35 @@ describe("/api/auth/* 限流行为", () => {
       expect(countLogs(errSpy, "auth_rate_limit_error")).toBe(0);
     } finally {
       env.AUTH_CREDENTIAL_LIMIT = original;
+    }
+  });
+
+  it("v1.7 R4：/api/tokimeki/ws 超限 429，且 Retry-After 与配置周期一致", async () => {
+    // No Origin/cookie: the handler returns 403/401, but the middleware runs
+    // first and counts every attempt. 2×limit+1 is robust to window phase.
+    const responses = await burst(
+      () => authPost("/api/tokimeki/ws", {}, IP_H, "GET"),
+      2 * TOKIMEKI_WS_LIMIT + 1,
+    );
+    const statuses = responses.map((r) => r.status);
+    expect(statuses.slice(0, TOKIMEKI_WS_LIMIT)).not.toContain(429);
+    expect(statuses.indexOf(429)).toBeGreaterThanOrEqual(TOKIMEKI_WS_LIMIT);
+    const limited = responses.find((r) => r.status === 429);
+    expect(limited).toBeDefined();
+    expect(limited?.headers.get("Retry-After")).toBe(String(RETRY_AFTER_SECONDS));
+  });
+
+  it("v1.7 R4：TOKIMEKI_WS_LIMIT 缺席时 fail-open + error 日志", async () => {
+    const original = env.TOKIMEKI_WS_LIMIT;
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      env.TOKIMEKI_WS_LIMIT = undefined;
+      const res = await authPost("/api/tokimeki/ws", {}, IP_I, "GET");
+      expect(res.status).not.toBe(429);
+      expect(countLogs(errSpy, "auth_rate_limit_binding_missing")).toBe(1);
+      expect(countLogs(errSpy, "auth_rate_limit_error")).toBe(0);
+    } finally {
+      env.TOKIMEKI_WS_LIMIT = original;
     }
   });
 

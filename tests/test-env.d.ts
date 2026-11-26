@@ -109,6 +109,8 @@ declare namespace Cloudflare {
     AUTH_CREDENTIAL_LIMIT?: RateLimit;
     AUTH_EMAIL_LIMIT?: RateLimit;
     TOKIMEKI_ANON_LIMIT?: RateLimit;
+    /** v1.7 R4: browser WebSocket proxy bucket; optional/fail-open. */
+    TOKIMEKI_WS_LIMIT?: RateLimit;
     /**
      * 维护者生产 fork（wrangler.prod.jsonc，gitignored）的**原文**，vitest.config.ts 在 Node 侧读取
      * 后注入；空串 = fork 不存在（裸仓库 clone），tests/config-fork.test.ts 的 prod-fork 组据此跳过。
