@@ -27,23 +27,19 @@ import {
   relayBaseUrl,
   sanitizeRelayText,
 } from "./common";
+import { buildUpstreamHeaders, type UpstreamTarget } from "./ws-headers";
 
 const UNAUTHORIZED_CLOSE = 4001;
 const INTERNAL_CLOSE = 4006;
 const MAX_PASSCODE_LENGTH = 128;
 const MIN_PASSCODE_LENGTH = 6;
 
-interface UpstreamTarget {
-  readonly url: string;
-  readonly sessionJwt: string;
-  readonly listener: boolean;
-}
-
 type WebSocketPairLike = { 0: WebSocket; 1: WebSocket };
 
 async function connectUpstream(
   target: UpstreamTarget,
   passcode: string | null,
+  clientIp: string | null,
 ): Promise<WebSocket | Response> {
   // Workers `fetch` rejects ws:// URLs; an http(s) URL with
   // `Upgrade: websocket` performs the upstream handshake.
@@ -53,15 +49,7 @@ async function connectUpstream(
   } else if (upstreamUrl.protocol === "ws:") {
     upstreamUrl.protocol = "http:";
   }
-  const headers = new Headers();
-  headers.set("upgrade", "websocket");
-  headers.set("x-tokimeki-session", target.sessionJwt);
-  if (target.listener) {
-    headers.set("x-tokimeki-listener", "1");
-  }
-  if (passcode !== null) {
-    headers.set("x-tokimeki-passcode", passcode);
-  }
+  const headers = buildUpstreamHeaders(target, passcode, clientIp);
   const response = await fetch(upstreamUrl, { method: "GET", headers, redirect: "manual" });
   const webSocket = (response as Response & { webSocket?: WebSocket }).webSocket;
   if (response.status !== 101 || webSocket === undefined) {
@@ -182,6 +170,8 @@ function parsePasscodeMessage(raw: unknown): string | null {
 
 export async function wsHandler(c: Context<AppEnv>): Promise<Response> {
   const requestUrl = new URL(c.req.url);
+  // Trust only the edge-set header. A client-supplied x-real-ip is never read.
+  const clientIp = c.req.header("cf-connecting-ip") ?? null;
   const requestOrigin = c.req.header("origin");
   if (requestOrigin === undefined || requestOrigin !== requestUrl.origin) {
     return c.json({ error: { message: "Forbidden" } }, 403);
@@ -241,7 +231,7 @@ export async function wsHandler(c: Context<AppEnv>): Promise<Response> {
   if (!invite.passcodeRequired && !gateRequested) {
     let upstream: WebSocket | Response;
     try {
-      upstream = await connectUpstream(target, null);
+      upstream = await connectUpstream(target, null, clientIp);
     } catch {
       return c.json({ error: { message: "relay_unavailable" } }, 502);
     }
@@ -288,7 +278,7 @@ export async function wsHandler(c: Context<AppEnv>): Promise<Response> {
     }
     let upstream: WebSocket | Response;
     try {
-      upstream = await connectUpstream(target, passcode);
+      upstream = await connectUpstream(target, passcode, clientIp);
     } catch {
       closeWithError(server, "transport_failed", "relay is unavailable", INTERNAL_CLOSE);
       return;

@@ -33,7 +33,11 @@ import type { AppEnv } from "../types";
  * 桶标识：credential = 凭据提交类；email = 匿名可打且会外发邮件 / 消耗外部资源的端点；
  * tokimeki-anon = 公开的匿名 Host JWT + invite 签发（每次写 D1 + 签 JWT，独立限额）。
  */
-export type AuthRateLimitBucket = "credential" | "email" | "tokimeki-anon";
+export type AuthRateLimitBucket =
+  | "credential"
+  | "email"
+  | "tokimeki-anon"
+  | "tokimeki-ws";
 
 /**
  * 完整请求路径 → 桶（**全路径**白名单）。
@@ -74,6 +78,9 @@ const BUCKET_BY_PATH: ReadonlyMap<string, AuthRateLimitBucket> = new Map([
   ["/api/tokimeki/attach/cli", "credential"],
   // 11-18-tokimeki-getting-started：匿名 host 签发独立桶（10 次/60s/IP）。
   ["/api/tokimeki/anon-host", "tokimeki-anon"],
+  // v1.7 R4：浏览器 WebSocket 代理独立桶（30 次/60s/IP）。一次性 ticket 在
+  // wsHandler 内消费；限流在中间件层，超限不会消费 ticket。
+  ["/api/tokimeki/ws", "tokimeki-ws"],
 ]);
 
 /** 纯函数：请求路径落在哪个桶；不在白名单内则 `null`（导出供单测直接锁路径表）。 */
@@ -86,9 +93,13 @@ const BINDING_BY_BUCKET = {
   credential: "AUTH_CREDENTIAL_LIMIT",
   email: "AUTH_EMAIL_LIMIT",
   "tokimeki-anon": "TOKIMEKI_ANON_LIMIT",
+  "tokimeki-ws": "TOKIMEKI_WS_LIMIT",
 } as const satisfies Record<
   AuthRateLimitBucket,
-  keyof Pick<Env, "AUTH_CREDENTIAL_LIMIT" | "AUTH_EMAIL_LIMIT" | "TOKIMEKI_ANON_LIMIT">
+  keyof Pick<
+    Env,
+    "AUTH_CREDENTIAL_LIMIT" | "AUTH_EMAIL_LIMIT" | "TOKIMEKI_ANON_LIMIT" | "TOKIMEKI_WS_LIMIT"
+  >
 >;
 
 /**

@@ -74,7 +74,9 @@
     { "name": "AUTH_EMAIL_LIMIT", "namespace_id": "1002", "simple": { "limit": 5, "period": 60 } },
     // Tokimeki 匿名 host 签发（11-18-tokimeki-getting-started）：独立桶，避免公开端点
     // 放大 Host JWT/invite 写入；period 仍只能是 10/60。
-    { "name": "TOKIMEKI_ANON_LIMIT", "namespace_id": "1003", "simple": { "limit": 10, "period": 60 } }
+    { "name": "TOKIMEKI_ANON_LIMIT", "namespace_id": "1003", "simple": { "limit": 10, "period": 60 } },
+    // v1.7 R4：浏览器 WebSocket 代理（/api/tokimeki/ws）独立桶，30 次/60s/IP。
+    { "name": "TOKIMEKI_WS_LIMIT", "namespace_id": "1004", "simple": { "limit": 30, "period": 60 } }
   ],
 
   // --- Queues：用量聚合 + 延迟计费异步管道（M5 / 08-31-perf-v2）---
